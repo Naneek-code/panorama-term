@@ -95,9 +95,10 @@ export const useTerminal = ({ tileId, scale, bodyW, bodyH }: UseTerminalParams) 
       const fit = new FitAddon();
       term.loadAddon(fit);
       term.open(host);
+      let webgl: WebglAddon | null = null;
       try {
-        const webgl = new WebglAddon();
-        webgl.onContextLoss(() => webgl.dispose());
+        webgl = new WebglAddon();
+        webgl.onContextLoss(() => webgl?.dispose());
         term.loadAddon(webgl);
       } catch {}
       fit.fit();
@@ -128,11 +129,19 @@ export const useTerminal = ({ tileId, scale, bodyW, bodyH }: UseTerminalParams) 
       });
 
       cleanup = () => {
-        dataSub.dispose();
+        zoomGen.current += 1;
         clearTimeout(settleTimer.current);
-        ws?.close();
-        term.dispose();
         termRef.current = null;
+        try {
+          dataSub.dispose();
+        } catch {}
+        ws?.close();
+        try {
+          webgl?.dispose();
+        } catch {}
+        try {
+          term.dispose();
+        } catch {}
       };
     });
 

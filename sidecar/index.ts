@@ -54,6 +54,7 @@ function getOrCreate(d: WsData): Session {
     cols,
     rows,
     cwd,
+    useConpty: true,
     env: { ...process.env, TERM: "xterm-256color", PANORAMA_TILE_ID: d.tileId } as Record<string, string>,
   });
 
@@ -88,16 +89,26 @@ function getOrCreate(d: WsData): Session {
   return s;
 }
 
+function killSession(s: Session): void {
+  sessions.delete(s.tileId);
+  if (s.exited) return;
+  const proc = s.proc;
+  try { proc.write(String.fromCharCode(3)); } catch {}
+  try { proc.write("exit\r"); } catch {}
+  setTimeout(() => {
+    if (s.exited) return;
+    try { proc.kill(); } catch {}
+  }, 1500);
+}
+
 const server = createServer((req, res) => {
+  res.setHeader("Access-Control-Allow-Origin", "*");
   const url = new URL(req.url || "/", `http://127.0.0.1:${PORT}`);
   if (url.pathname === "/health") return void res.end("ok");
   if (url.pathname === "/kill") {
     const tileId = url.searchParams.get("tileId");
     const s = tileId ? sessions.get(tileId) : undefined;
-    if (s) {
-      try { s.proc.kill(); } catch {}
-      sessions.delete(s.tileId);
-    }
+    if (s) killSession(s);
     return void res.end("ok");
   }
   if (url.pathname === "/sessions") {
@@ -153,10 +164,7 @@ wss.on("connection", (ws, req) => {
         try { m = JSON.parse(data.toString()); } catch { return; }
         if (m.t === "in" && typeof m.d === "string") s.proc.write(m.d);
         else if (m.t === "resize" && m.cols && m.rows) s.proc.resize(clamp(m.cols, 2), clamp(m.rows, 2));
-        else if (m.t === "kill") {
-          s.proc.kill();
-          sessions.delete(s.tileId);
-        }
+        else if (m.t === "kill") killSession(s);
       } else {
         s.proc.write(data.toString());
       }
