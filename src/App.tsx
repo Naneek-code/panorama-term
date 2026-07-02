@@ -1,5 +1,11 @@
 import Canvas from '~/components/Canvas';
+import Titlebar from '~/components/commons/Titlebar';
 
-const App = () => <Canvas />;
+const App = () => (
+  <>
+    <Titlebar />
+    <Canvas />
+  </>
+);
 
 export default App;

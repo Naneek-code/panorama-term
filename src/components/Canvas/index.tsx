@@ -11,10 +11,8 @@ const Canvas = () => {
     endPan,
     gridRef,
     onWheel,
-    addTile,
     moveTile,
     closeTile,
-    resetZoom,
     indicatorRef,
     onBgPointerMove,
     onBgPointerDown
@@ -22,15 +20,6 @@ const Canvas = () => {
 
   return (
     <div className={styles.root}>
-      <div className={styles.toolbar}>
-        <button className={styles.add} onClick={addTile}>
-          + Terminal
-        </button>
-        <button className={styles.zoomReset} onClick={resetZoom}>
-          {Math.round(view.k * 100)}%
-        </button>
-        <span className={styles.hint}>wheel to zoom · ctrl/shift+wheel or drag to pan · drag tile header to move</span>
-      </div>
       <div
         ref={bgRef}
         className={styles.bg}

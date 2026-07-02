@@ -3,52 +3,17 @@
   inset: 0;
 }
 
-.toolbar {
-  position: fixed;
-  top: 0;
-  left: 0;
-  right: 0;
-  z-index: 10;
-  display: flex;
-  align-items: center;
-  gap: 12px;
-  height: 40px;
-  padding: 0 12px;
-  background: #12161f;
-  border-bottom: 1px solid #1e2430;
-}
-
-.add,
-.zoomReset {
-  border: none;
-  cursor: pointer;
-  border-radius: 6px;
-  padding: 6px 12px;
-  font-size: 13px;
-}
-
-.add {
-  color: #fff;
-  background: #2b6cff;
-}
-
-.zoomReset {
-  color: #c7d0e0;
-  min-width: 52px;
-  background: #1e2430;
-  font-variant-numeric: tabular-nums;
-}
-
-.hint {
-  color: #5a6577;
-  font-size: 11px;
-}
-
 .bg {
   position: absolute;
-  inset: 40px 0 0 0;
+  inset: 46px 8px 8px;
   overflow: hidden;
   cursor: grab;
+  background: #10141c;
+  border: 1px solid #1e2430;
+  border-radius: 8px;
+  box-shadow:
+    0 1px 2px rgba(0, 0, 0, 0.4),
+    0 4px 14px rgba(0, 0, 0, 0.35);
 
   &:active {
     cursor: grabbing;
