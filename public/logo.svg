@@ -1,0 +1,32 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="177 177 670 670">
+  <defs>
+    <linearGradient id="g" gradientUnits="userSpaceOnUse" x1="218" y1="218" x2="806" y2="806">
+      <stop offset="0" stop-color="#34e8a4"/>
+      <stop offset="0.5" stop-color="#22d3c5"/>
+      <stop offset="1" stop-color="#38b6f5"/>
+    </linearGradient>
+    <pattern id="dots" width="26" height="26" patternUnits="userSpaceOnUse">
+      <circle cx="13" cy="13" r="2.2" fill="#3a4150"/>
+    </pattern>
+    <mask id="ring">
+      <rect x="218" y="218" width="588" height="588" rx="110" fill="#fff"/>
+      <rect x="300" y="300" width="424" height="424" rx="84" fill="#000"/>
+    </mask>
+  </defs>
+
+  <rect x="218" y="218" width="588" height="588" rx="110" fill="#0d1117"/>
+  <rect x="218" y="218" width="588" height="588" rx="110" fill="url(#dots)" mask="url(#ring)"/>
+  <rect x="218" y="218" width="588" height="588" rx="110" fill="none" stroke="url(#g)" stroke-width="22"/>
+
+  <rect x="300" y="300" width="424" height="424" rx="84" fill="none" stroke="url(#g)" stroke-width="18"/>
+
+  <g stroke="url(#g)" stroke-width="26" stroke-linecap="round" stroke-linejoin="round" fill="none">
+    <path d="M386 394 L460 458 L386 522"/>
+    <line x1="488" y1="522" x2="562" y2="522"/>
+  </g>
+
+  <g stroke="url(#g)" stroke-width="16" stroke-linecap="round" fill="none">
+    <line x1="396" y1="592" x2="614" y2="592"/>
+    <line x1="396" y1="638" x2="518" y2="638"/>
+  </g>
+</svg>
