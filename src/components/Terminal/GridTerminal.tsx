@@ -25,12 +25,24 @@ const PAINT_MS = 60;
 const BG = '#0b0e14';
 
 let cellW = 7.23;
+let fontReady = false;
 const measureCell = () => {
   const c = document.createElement('canvas').getContext('2d');
   if (!c) return;
   c.font = `${FONT}px Hack, monospace`;
   const w = c.measureText('M').width;
   if (w > 0) cellW = w;
+};
+
+const ensureFont = (): Promise<void> => {
+  if (fontReady) return Promise.resolve();
+  return Promise.all([
+    document.fonts.load(`${FONT}px Hack`),
+    document.fonts.load(`bold ${FONT}px Hack`)
+  ]).then(() => {
+    fontReady = true;
+    measureCell();
+  });
 };
 
 const hex = (v: number): string => '#' + (v & 0xffffff).toString(16).padStart(6, '0');
@@ -131,6 +143,7 @@ const GridTerminal = ({ tileId, cwd, cols, rows, active, visible, k }: GridTermi
     const yOff = (CELL_H - FONT) / 2;
     for (let r = 0; r < nRows; r++) {
       const line = lines[r] ?? '';
+      const cells = Array.from(line);
       for (let c = 0; c < nCols; c++) {
         const i = (r * nCols + c) * 2;
         const w0 = attrs[i] ?? 0;
@@ -139,7 +152,7 @@ const GridTerminal = ({ tileId, cwd, cols, rows, active, visible, k }: GridTermi
           ctx.fillStyle = hex(w1);
           ctx.fillRect(c * cellW, r * CELL_H, cellW + 0.5, CELL_H);
         }
-        const ch = line[c];
+        const ch = cells[c];
         if (ch && ch !== ' ') {
           ctx.font = `${w0 & (1 << 24) ? 'bold ' : ''}${FONT}px Hack, monospace`;
           ctx.fillStyle = hex(w0);
@@ -159,6 +172,9 @@ const GridTerminal = ({ tileId, cwd, cols, rows, active, visible, k }: GridTermi
     let retry: ReturnType<typeof setTimeout> | undefined;
     const target = getSetting(TERMINAL_TARGET_KEY, 'auto');
     measureCell();
+    ensureFont().then(() => {
+      if (!disposed) dirtyRef.current = true;
+    });
     const paint = setInterval(() => {
       if (!dirtyRef.current) return;
       dirtyRef.current = false;
