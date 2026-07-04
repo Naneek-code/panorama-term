@@ -18,6 +18,9 @@ serde_json = "1"
 [target.'cfg(unix)'.dependencies]
 libc = "0.2"
 
+[profile.dev.package.vt100]
+overflow-checks = false
+
 [profile.release]
 opt-level = "s"
 lto = true

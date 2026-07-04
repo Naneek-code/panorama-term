@@ -76,8 +76,8 @@ export const sendPtyResize = (ws: WebSocket, cols: number, rows: number): void =
   if (ws.readyState === WebSocket.OPEN) ws.send(JSON.stringify({ t: 'resize', cols, rows }));
 };
 
-export const sendPtyScroll = (ws: WebSocket, rows: number): void => {
-  if (ws.readyState === WebSocket.OPEN) ws.send(JSON.stringify({ t: 'scroll', rows }));
+export const sendPtyScroll = (ws: WebSocket, dir: number, lines: number, col: number, row: number): void => {
+  if (ws.readyState === WebSocket.OPEN) ws.send(JSON.stringify({ t: 'scroll', dir, lines, col, row }));
 };
 
 export const sendPtyKill = (ws: WebSocket): void => {

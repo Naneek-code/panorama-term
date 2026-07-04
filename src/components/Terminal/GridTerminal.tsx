@@ -57,7 +57,6 @@ const GridTerminal = ({ tileId, cwd, cols, rows, active, visible, k, restartKey 
   const canvasRef = React.useRef<HTMLCanvasElement>(null);
   const wsRef = React.useRef<WebSocket | null>(null);
   const frameRef = React.useRef<GridFrame | null>(null);
-  const scrollRef = React.useRef(0);
   const dirtyRef = React.useRef(true);
   const blinkRef = React.useRef(true);
   const selRef = React.useRef<Selection | null>(null);
@@ -183,7 +182,6 @@ const GridTerminal = ({ tileId, cwd, cols, rows, active, visible, k, restartKey 
         {
           onGrid: (frame) => {
             frameRef.current = frame;
-            scrollRef.current = frame.offset;
             dirtyRef.current = true;
           },
           onExit: () => {},
@@ -248,7 +246,7 @@ const GridTerminal = ({ tileId, cwd, cols, rows, active, visible, k, restartKey 
     return () => clearInterval(id);
   }, [active]);
 
-  const cellFromEvent = (e: React.PointerEvent): Cell | null => {
+  const cellFromEvent = (e: React.MouseEvent): Cell | null => {
     const canvas = canvasRef.current;
     const frame = frameRef.current;
     if (!canvas || !frame) return null;
@@ -375,11 +373,10 @@ const GridTerminal = ({ tileId, cwd, cols, rows, active, visible, k, restartKey 
     const ws = wsRef.current;
     if (!ws) return;
     e.stopPropagation();
-    const next = Math.max(0, scrollRef.current + (e.deltaY < 0 ? 3 : -3));
-    if (next === scrollRef.current) return;
-    scrollRef.current = next;
+    const cell = cellFromEvent(e);
+    const dir = e.deltaY < 0 ? 1 : -1;
     clearSelection();
-    sendPtyScroll(ws, next);
+    sendPtyScroll(ws, dir, 3, (cell?.col ?? 0) + 1, (cell?.row ?? 0) + 1);
   };
 
   return (

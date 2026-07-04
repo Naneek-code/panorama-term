@@ -572,9 +572,7 @@ fn spawn_session(
                     if chunk.is_empty() {
                         continue;
                     }
-                    if let Ok(mut parser) = s.parser.lock() {
-                        parser.process(chunk);
-                    }
+                    s.parser.lock().unwrap_or_else(|e| e.into_inner()).process(chunk);
                     if let Ok(mut raw) = s.raw.lock() {
                         raw.extend_from_slice(chunk);
                         if raw.len() > RAW_CAP {
@@ -647,9 +645,66 @@ fn resize_session(s: &Session, cols: u16, rows: u16) {
             pixel_height: 0,
         });
     }
-    if let Ok(mut parser) = s.parser.lock() {
-        parser.set_size(rows, cols);
+    s.parser.lock().unwrap_or_else(|e| e.into_inner()).set_size(rows, cols);
+    s.dirty.store(true, Ordering::Relaxed);
+}
+
+fn scroll_session(s: &Session, dir: i64, lines: usize, col: usize, row: usize) {
+    let (alt, app_cursor, mouse, enc) = {
+        let parser = s.parser.lock().unwrap_or_else(|e| e.into_inner());
+        let sc = parser.screen();
+        (
+            sc.alternate_screen(),
+            sc.application_cursor(),
+            sc.mouse_protocol_mode(),
+            sc.mouse_protocol_encoding(),
+        )
+    };
+
+    if mouse != vt100::MouseProtocolMode::None {
+        let cb: i64 = if dir > 0 { 64 } else { 65 };
+        let mut seq: Vec<u8> = Vec::new();
+        match enc {
+            vt100::MouseProtocolEncoding::Sgr => {
+                seq.extend_from_slice(format!("\x1b[<{};{};{}M", cb, col, row).as_bytes());
+            }
+            _ => {
+                let cx = (col.min(223) as u8).saturating_add(32);
+                let cy = (row.min(223) as u8).saturating_add(32);
+                seq.extend_from_slice(&[0x1b, b'[', b'M', (cb as u8) + 32, cx, cy]);
+            }
+        }
+        if let Ok(mut w) = s.writer.lock() {
+            let _ = w.write_all(&seq);
+            let _ = w.flush();
+        }
+        return;
     }
+
+    if alt {
+        let arrow: &[u8] = match (dir > 0, app_cursor) {
+            (true, true) => b"\x1bOA",
+            (true, false) => b"\x1b[A",
+            (false, true) => b"\x1bOB",
+            (false, false) => b"\x1b[B",
+        };
+        if let Ok(mut w) = s.writer.lock() {
+            for _ in 0..lines {
+                let _ = w.write_all(arrow);
+            }
+            let _ = w.flush();
+        }
+        return;
+    }
+
+    let cur = s.scrollback.load(Ordering::Relaxed) as i64;
+    let desired = (cur + dir * lines as i64).max(0) as usize;
+    let actual = {
+        let mut parser = s.parser.lock().unwrap_or_else(|e| e.into_inner());
+        parser.set_scrollback(desired);
+        parser.screen().scrollback()
+    };
+    s.scrollback.store(actual, Ordering::Relaxed);
     s.dirty.store(true, Ordering::Relaxed);
 }
 
@@ -687,7 +742,7 @@ fn kill_session(s: &Arc<Session>) {
 }
 
 fn build_frame(s: &Session) -> Vec<u8> {
-    let mut parser = s.parser.lock().unwrap();
+    let mut parser = s.parser.lock().unwrap_or_else(|e| e.into_inner());
     parser.set_scrollback(s.scrollback.load(Ordering::Relaxed));
     let screen = parser.screen();
     let offset = screen.scrollback() as u16;
@@ -770,9 +825,13 @@ fn handle_client_msg(s: &Arc<Session>, text: &str) {
             }
         }
         Some("scroll") => {
-            let rows = v.get("rows").and_then(|r| r.as_u64()).unwrap_or(0) as usize;
-            s.scrollback.store(rows.min(SCROLLBACK_LINES), Ordering::Relaxed);
-            s.dirty.store(true, Ordering::Relaxed);
+            let dir = v.get("dir").and_then(|d| d.as_i64()).unwrap_or(0);
+            let lines = v.get("lines").and_then(|l| l.as_u64()).unwrap_or(3) as usize;
+            let col = v.get("col").and_then(|c| c.as_u64()).unwrap_or(1) as usize;
+            let row = v.get("row").and_then(|r| r.as_u64()).unwrap_or(1) as usize;
+            if dir != 0 && lines != 0 {
+                scroll_session(s, dir, lines, col, row);
+            }
         }
         Some("resize") => {
             let cols = v.get("cols").and_then(|c| c.as_u64()).unwrap_or(0) as u16;
