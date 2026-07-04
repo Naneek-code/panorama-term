@@ -7,6 +7,8 @@ export default defineConfig({
   clearScreen: false,
   server: { port: 1420, strictPort: true },
   resolve: {
-    alias: { "~": fileURLToPath(new URL("./src", import.meta.url)) },
+    alias: {
+      "~": fileURLToPath(new URL("./src", import.meta.url)),
+    },
   },
 });

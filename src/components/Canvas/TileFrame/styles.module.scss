@@ -9,6 +9,11 @@
   box-shadow: 0 8px 24px rgba(0, 0, 0, 0.4);
 }
 
+.active {
+  outline: 2px dashed #4a90d9;
+  outline-offset: 1.5px;
+}
+
 .header {
   display: flex;
   align-items: center;
@@ -47,6 +52,10 @@
   overflow: hidden;
 }
 
+.locked > * {
+  pointer-events: none;
+}
+
 .placeholder {
   display: flex;
   align-items: center;
@@ -54,6 +63,7 @@
   height: 100%;
   color: #4a5568;
   font-size: 12px;
+  user-select: none;
   font-family: 'Geist Mono', ui-monospace, monospace;
 }
 

@@ -1,7 +1,7 @@
-import type { Tile, View } from '~/domain/interfaces/canvas.interface';
+import type { View } from '~/domain/interfaces/canvas.interface';
 import { CELL, MAJOR, ZOOM_MIN } from '~/usecase/util/constants';
 
-export const drawGrid = (canvas: HTMLCanvasElement, view: View, tiles: Tile[]): void => {
+export const drawGrid = (canvas: HTMLCanvasElement, view: View): void => {
   const ctx = canvas.getContext('2d');
   if (!ctx) return;
   const w = canvas.clientWidth;
@@ -15,19 +15,6 @@ export const drawGrid = (canvas: HTMLCanvasElement, view: View, tiles: Tile[]): 
   }
   ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
   ctx.clearRect(0, 0, w, h);
-
-  const rects = tiles.map((t) => ({
-    l: t.x * view.k + view.x,
-    t: t.y * view.k + view.y,
-    r: (t.x + t.width) * view.k + view.x,
-    b: (t.y + t.height) * view.k + view.y
-  }));
-  const insideTile = (px: number, py: number): boolean => {
-    for (const r of rects) {
-      if (px >= r.l && px <= r.r && py >= r.t && py <= r.b) return true;
-    }
-    return false;
-  };
 
   const step = CELL * view.k;
   const majorStep = MAJOR * view.k;
@@ -43,7 +30,6 @@ export const drawGrid = (canvas: HTMLCanvasElement, view: View, tiles: Tile[]): 
     const halfDot = dotSize / 2;
     for (let x = dotOffX; x <= w; x += step) {
       for (let y = dotOffY; y <= h; y += step) {
-        if (insideTile(x, y)) continue;
         ctx.fillRect(Math.round(x - halfDot), Math.round(y - halfDot), dotSize, dotSize);
       }
     }
@@ -56,7 +42,6 @@ export const drawGrid = (canvas: HTMLCanvasElement, view: View, tiles: Tile[]): 
     ctx.fillStyle = `rgba(255,255,255,${0.25 * majorFade})`;
     for (let x = offX; x <= w; x += majorStep) {
       for (let y = offY; y <= h; y += majorStep) {
-        if (insideTile(x, y)) continue;
         ctx.fillRect(Math.round(x - halfMajor), Math.round(y - halfMajor), majorDotSize, majorDotSize);
       }
     }

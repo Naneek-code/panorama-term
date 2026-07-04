@@ -4,6 +4,7 @@ import { SquareTerminal } from 'lucide-react';
 import TileFrame from '~/components/Canvas/TileFrame';
 import ContextMenu from '~/components/commons/ContextMenu';
 import { useCanvas } from '~/usecase/hooks/useCanvas';
+import { TILE_GAP, CULL_MARGIN, MIN_LIVE_WIDTH } from '~/usecase/util/constants';
 import { useWorkspace } from '~/usecase/context/WorkspaceContext';
 
 import styles from './styles.module.scss';
@@ -28,13 +29,37 @@ const Canvas = () => {
     moveTile,
     snapTile,
     closeTile,
+    activeTile,
     resizeTile,
+    activateTile,
     indicatorRef,
     onBgPointerMove,
     onBgPointerDown
   } = useCanvas({ seed: activeState, onPersist: saveActiveState });
 
   const [menu, setMenu] = React.useState<Menu | null>(null);
+  const [size, setSize] = React.useState({ w: window.innerWidth, h: window.innerHeight });
+  const activated = React.useRef<Set<string>>(new Set());
+
+  React.useEffect(() => {
+    const onResize = () => setSize({ w: window.innerWidth, h: window.innerHeight });
+    window.addEventListener('resize', onResize);
+    return () => window.removeEventListener('resize', onResize);
+  }, []);
+
+  const inset = TILE_GAP / 2;
+  const isVisible = (t: (typeof tiles)[number]): boolean => {
+    const left = (t.x + inset) * view.k + view.x;
+    const top = (t.y + inset) * view.k + view.y;
+    const w = (t.width - TILE_GAP) * view.k;
+    const h = (t.height - TILE_GAP) * view.k;
+    return (
+      left < size.w + CULL_MARGIN &&
+      left + w > -CULL_MARGIN &&
+      top < size.h + CULL_MARGIN &&
+      top + h > -CULL_MARGIN
+    );
+  };
 
   const closeMenu = () => setMenu(null);
 
@@ -64,17 +89,26 @@ const Canvas = () => {
         onPointerCancel={endPan}
       >
         <canvas ref={gridRef} className={styles.grid} />
-        {tiles.map((t) => (
-          <TileFrame
-            key={t.id}
-            tile={t}
-            view={view}
-            onMove={moveTile}
-            onSnap={snapTile}
-            onClose={closeTile}
-            onResize={resizeTile}
-          />
-        ))}
+        {tiles.map((t) => {
+          const vis = isVisible(t);
+          if (vis && (t.width - TILE_GAP) * view.k >= MIN_LIVE_WIDTH) activated.current.add(t.id);
+          const live = activated.current.has(t.id);
+          return (
+            <TileFrame
+              key={t.id}
+              tile={t}
+              view={view}
+              onMove={moveTile}
+              onSnap={snapTile}
+              onClose={closeTile}
+              onResize={resizeTile}
+              onActivate={activateTile}
+              active={t.id === activeTile}
+              visible={vis}
+              live={live}
+            />
+          );
+        })}
         <div ref={indicatorRef} className={styles.indicator}>
           100%
         </div>

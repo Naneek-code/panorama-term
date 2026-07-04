@@ -2,7 +2,7 @@ import React from 'react';
 import { X } from 'lucide-react';
 
 import type { Tile, View } from '~/domain/interfaces/canvas.interface';
-import Terminal from '~/components/Terminal';
+import GridTerminal from '~/components/Terminal/GridTerminal';
 import { TILE_GAP, TILE_HEADER } from '~/usecase/util/constants';
 
 import styles from './styles.module.scss';
@@ -10,20 +10,27 @@ import styles from './styles.module.scss';
 interface TileFrameProps {
   tile: Tile;
   view: View;
+  active: boolean;
+  visible: boolean;
+  live: boolean;
   onClose: (id: string) => void;
   onSnap: (id: string) => void;
+  onActivate: (id: string) => void;
   onMove: (id: string, dx: number, dy: number) => void;
   onResize: (id: string, dir: string, dx: number, dy: number) => void;
 }
 
 const HANDLES = ['n', 's', 'e', 'w', 'nw', 'ne', 'sw', 'se'];
 
-const TileFrame = ({ tile, view, onMove, onSnap, onClose, onResize }: TileFrameProps) => {
+const TileFrame = ({ tile, view, active, visible, live, onMove, onSnap, onClose, onResize, onActivate }: TileFrameProps) => {
   const k = view.k;
   const drag = React.useRef<{ sx: number; sy: number; ox: number; oy: number } | null>(null);
   const resize = React.useRef<{ x: number; y: number; dir: string } | null>(null);
 
   const startDrag = (e: React.PointerEvent) => {
+    if (e.button !== 0) return;
+    e.stopPropagation();
+    onActivate(tile.id);
     (e.target as Element).setPointerCapture(e.pointerId);
     drag.current = { sx: e.clientX, sy: e.clientY, ox: tile.x, oy: tile.y };
   };
@@ -39,7 +46,9 @@ const TileFrame = ({ tile, view, onMove, onSnap, onClose, onResize }: TileFrameP
   };
 
   const startResize = (dir: string) => (e: React.PointerEvent) => {
+    if (e.button !== 0) return;
     e.stopPropagation();
+    onActivate(tile.id);
     (e.target as Element).setPointerCapture(e.pointerId);
     resize.current = { x: e.clientX, y: e.clientY, dir };
   };
@@ -64,8 +73,8 @@ const TileFrame = ({ tile, view, onMove, onSnap, onClose, onResize }: TileFrameP
 
   return (
     <div
-      data-tile
-      className={styles.tile}
+      data-tile={tile.id}
+      className={active ? `${styles.tile} ${styles.active}` : styles.tile}
       style={{
         top: (tile.y + inset) * k + view.y,
         left: (tile.x + inset) * k + view.x,
@@ -88,10 +97,20 @@ const TileFrame = ({ tile, view, onMove, onSnap, onClose, onResize }: TileFrameP
         </button>
       </div>
       <div className={styles.body}>
-        {tile.type === 'term' ? (
-          <Terminal tileId={tile.id} scale={k} bodyW={bodyW} bodyH={bodyH - TILE_HEADER} />
+        {tile.type !== 'term' ? (
+          <div className={styles.placeholder}>{label}</div>
+        ) : live ? (
+          <GridTerminal
+            k={k}
+            cwd={tile.cwd}
+            active={active}
+            visible={visible}
+            tileId={tile.id}
+            cols={Math.max(20, Math.floor(bodyW / 7.23))}
+            rows={Math.max(2, Math.floor((bodyH - TILE_HEADER) / 15))}
+          />
         ) : (
-          <div className={styles.placeholder}>{tile.type}</div>
+          <div className={styles.placeholder} />
         )}
       </div>
       {HANDLES.map((dir) => (

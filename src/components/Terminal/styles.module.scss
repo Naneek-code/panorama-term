@@ -4,3 +4,26 @@
   left: 0;
   transform-origin: 0 0;
 }
+
+.wasm {
+  display: block;
+  overflow: hidden;
+  user-select: none;
+  background: #0b0e14;
+}
+
+.lite {
+  width: 100%;
+  height: 100%;
+  margin: 0;
+  padding: 0;
+  overflow: hidden;
+  color: #c7d0e0;
+  background: #0b0e14;
+  font-size: 11.8px;
+  line-height: 1.2;
+  user-select: none;
+  white-space: pre-wrap;
+  word-break: break-all;
+  font-family: 'Hack', ui-monospace, monospace;
+}

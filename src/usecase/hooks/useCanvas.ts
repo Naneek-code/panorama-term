@@ -3,6 +3,7 @@ import React from 'react';
 import type { Tile, View } from '~/domain/interfaces/canvas.interface';
 import type { CanvasState } from '~/domain/interfaces/workspace.interface';
 import { drawGrid } from '~/usecase/util/gridUtils';
+import { getSetting } from '~/adapter/settings/settings.client';
 import { restTarget } from '~/usecase/util/zoomUtils';
 import { killPtySession } from '~/adapter/pty/sidecar.client';
 import { computeDragSnap } from '~/usecase/util/magneticSnap';
@@ -15,6 +16,7 @@ import {
   ZOOM_MAX,
   SNAP_DELAY,
   TILE_WIDTH,
+  MAX_ZOOM_KEY,
   TILE_HEIGHT,
   INDICATOR_MS,
   TILE_MIN_WIDTH,
@@ -23,7 +25,9 @@ import {
   TILE_MIN_HEIGHT
 } from '~/usecase/util/constants';
 
-type PanOrigin = { ox: number; oy: number; vx: number; vy: number };
+const maxZoom = (): number => Math.min(ZOOM_MAX, Math.max(1, getSetting(MAX_ZOOM_KEY, 1)));
+
+type PanOrigin = { ox: number; oy: number; vx: number; vy: number; moved: boolean; pan: boolean; activateId: string | null };
 
 const createId = (): string => Math.random().toString(36).slice(2, 10);
 
@@ -39,6 +43,7 @@ export const useCanvas = ({ seed, onPersist }: UseCanvasArgs) => {
   const frames = React.useRef(initial.current.frames);
   const [tiles, setTiles] = React.useState<Tile[]>(initial.current.tiles);
   const [view, setView] = React.useState<View>(initial.current.view);
+  const [activeTile, setActiveTile] = React.useState<string | null>(null);
 
   const bgRef = React.useRef<HTMLDivElement>(null);
   const gridRef = React.useRef<HTMLCanvasElement>(null);
@@ -57,12 +62,13 @@ export const useCanvas = ({ seed, onPersist }: UseCanvasArgs) => {
   const panRef = React.useRef<PanOrigin | null>(null);
 
   React.useEffect(() => {
-    onPersist(toStored({ tiles, view, frames: frames.current }));
+    const id = setTimeout(() => onPersist(toStored({ tiles, view, frames: frames.current })), 400);
+    return () => clearTimeout(id);
   }, [tiles, view, onPersist]);
 
   React.useEffect(() => {
-    if (gridRef.current) drawGrid(gridRef.current, view, tiles);
-  }, [view, tiles]);
+    if (gridRef.current) drawGrid(gridRef.current, view);
+  }, [view]);
 
   React.useEffect(() => {
     if (firstRender.current) {
@@ -88,7 +94,7 @@ export const useCanvas = ({ seed, onPersist }: UseCanvasArgs) => {
       setView((v) => ({ ...v, x: v.x + (w - prevW) / 2, y: v.y + (h - prevH) / 2 }));
       prevW = w;
       prevH = h;
-      if (gridRef.current) drawGrid(gridRef.current, viewRef.current, tilesRef.current);
+      if (gridRef.current) drawGrid(gridRef.current, viewRef.current);
     });
     ro.observe(bg);
     return () => ro.disconnect();
@@ -125,7 +131,19 @@ export const useCanvas = ({ seed, onPersist }: UseCanvasArgs) => {
 
   const closeTile = React.useCallback((id: string) => {
     setTiles((prev) => prev.filter((t) => t.id !== id));
+    setActiveTile((a) => (a === id ? null : a));
     void killPtySession(id);
+  }, []);
+
+  const setTileCwd = React.useCallback((id: string, cwd: string) => {
+    const autoTitle = cwd.split(/[\\/]/).filter(Boolean).pop() || cwd;
+    setTiles((prev) =>
+      prev.map((t) =>
+        t.id === id && (t.cwd !== cwd || t.autoTitle !== autoTitle)
+          ? { ...t, cwd, autoTitle }
+          : t
+      )
+    );
   }, []);
 
   const moveTile = React.useCallback(
@@ -196,7 +214,7 @@ export const useCanvas = ({ seed, onPersist }: UseCanvasArgs) => {
     const animate = () => {
       let done = false;
       setView((v) => {
-        const target = restTarget(v.k);
+        const target = restTarget(v.k, maxZoom());
         let k = v.k + (target - v.k) * 0.15;
         if (Math.abs(k - target) < 0.001) {
           k = target;
@@ -211,7 +229,8 @@ export const useCanvas = ({ seed, onPersist }: UseCanvasArgs) => {
   }, []);
 
   const onWheel = (e: React.WheelEvent) => {
-    if ((e.target as Element).closest('[data-tile]')) return;
+    const tileEl = (e.target as Element).closest('[data-tile]');
+    if (tileEl && tileEl.getAttribute('data-tile') === activeTile) return;
     if (e.shiftKey) {
       setView((v) => ({ ...v, x: v.x - (e.deltaX || e.deltaY) * 1.2 }));
       return;
@@ -229,11 +248,12 @@ export const useCanvas = ({ seed, onPersist }: UseCanvasArgs) => {
     const py = e.clientY - rect.top;
     focal.current = { x: px, y: py };
 
+    const ceil = maxZoom();
     setView((v) => {
       const clamped = Math.sign(e.deltaY) * Math.min(Math.abs(e.deltaY), MAX_ZOOM_DELTA);
       let factor = Math.exp((-clamped * 0.6) / 100);
-      if (v.k >= ZOOM_MAX && factor > 1) {
-        const overshoot = v.k / ZOOM_MAX - 1;
+      if (v.k >= ceil && factor > 1) {
+        const overshoot = v.k / ceil - 1;
         factor = 1 + (factor - 1) / (1 + overshoot * RUBBER_K);
       } else if (v.k <= ZOOM_MIN && factor < 1) {
         const overshoot = ZOOM_MIN / v.k - 1;
@@ -241,26 +261,35 @@ export const useCanvas = ({ seed, onPersist }: UseCanvasArgs) => {
       }
       const k = v.k * factor;
       const ratio = k / v.k - 1;
-      if (k > 1 || k < ZOOM_MIN) snapTimer.current = setTimeout(snapBack, SNAP_DELAY);
+      if (k > ceil || k < ZOOM_MIN) snapTimer.current = setTimeout(snapBack, SNAP_DELAY);
       return { k, x: v.x - (px - v.x) * ratio, y: v.y - (py - v.y) * ratio };
     });
   };
 
   const onBgPointerDown = (e: React.PointerEvent) => {
-    if (e.target !== e.currentTarget && e.target !== gridRef.current) return;
+    const tileEl = (e.target as Element).closest('[data-tile]');
+    const tileId = tileEl?.getAttribute('data-tile') ?? null;
+    const pan = e.button === 1;
+    if (!pan && tileId && tileId === activeTile) return;
+    if (pan) e.preventDefault();
     (e.currentTarget as Element).setPointerCapture(e.pointerId);
-    panRef.current = { ox: e.clientX, oy: e.clientY, vx: view.x, vy: view.y };
+    panRef.current = { ox: e.clientX, oy: e.clientY, vx: view.x, vy: view.y, moved: false, pan, activateId: tileId };
   };
 
   const onBgPointerMove = (e: React.PointerEvent) => {
     const p = panRef.current;
     if (!p) return;
+    if (!p.moved && Math.hypot(e.clientX - p.ox, e.clientY - p.oy) > 4) p.moved = true;
     setView((v) => ({ ...v, x: p.vx + (e.clientX - p.ox), y: p.vy + (e.clientY - p.oy) }));
   };
 
   const endPan = () => {
+    const p = panRef.current;
     panRef.current = null;
+    if (p && !p.moved && !p.pan) setActiveTile(p.activateId);
   };
+
+  const activateTile = React.useCallback((id: string) => setActiveTile(id), []);
 
   return {
     view,
@@ -273,8 +302,11 @@ export const useCanvas = ({ seed, onPersist }: UseCanvasArgs) => {
     moveTile,
     snapTile,
     closeTile,
+    activeTile,
+    setTileCwd,
     resetZoom,
     resizeTile,
+    activateTile,
     indicatorRef,
     onBgPointerMove,
     onBgPointerDown

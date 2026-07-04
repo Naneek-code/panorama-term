@@ -4,6 +4,7 @@ dist-ssr
 *.local
 
 src-tauri/target
+sidecar-rs/target
 
 *.log
 .DS_Store
