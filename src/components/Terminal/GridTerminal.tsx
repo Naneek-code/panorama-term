@@ -64,6 +64,8 @@ const GridTerminal = ({ tileId, cwd, cols, rows, active, visible, k, restartKey 
   const selectingRef = React.useRef(false);
   const clickRef = React.useRef({ t: 0, row: -1, col: -1, count: 0 });
   const pendingResumeRef = React.useRef(false);
+  const prevKRef = React.useRef(k);
+  const settleRef = React.useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
   const activeRef = React.useRef(active);
   const visibleRef = React.useRef(visible);
   const kRef = React.useRef(k);
@@ -94,6 +96,15 @@ const GridTerminal = ({ tileId, cwd, cols, rows, active, visible, k, restartKey 
     const w = nCols * cellW;
     const h = nRows * CELL_H;
     const scale = (window.devicePixelRatio || 1) * kRef.current;
+    const moving = Math.abs(kRef.current - prevKRef.current) > 1e-4;
+    prevKRef.current = kRef.current;
+    if (moving) {
+      clearTimeout(settleRef.current);
+      settleRef.current = setTimeout(() => {
+        dirtyRef.current = true;
+      }, 140);
+      return;
+    }
     const bw = Math.ceil(w * scale);
     const bh = Math.ceil(h * scale);
     if (canvas.width !== bw || canvas.height !== bh) {
@@ -177,7 +188,7 @@ const GridTerminal = ({ tileId, cwd, cols, rows, active, visible, k, restartKey 
           },
           onExit: () => {},
           onReady: (info) => {
-            if (!pendingResumeRef.current || !info.resumeId) return;
+            if (!pendingResumeRef.current || !info.resumeId || info.reused) return;
             pendingResumeRef.current = false;
             const id = info.resumeId;
             setTimeout(() => {
@@ -198,6 +209,7 @@ const GridTerminal = ({ tileId, cwd, cols, rows, active, visible, k, restartKey 
       disposed = true;
       clearInterval(paint);
       clearTimeout(retry);
+      clearTimeout(settleRef.current);
       wsRef.current?.close();
       wsRef.current = null;
       frameRef.current = null;
@@ -213,12 +225,10 @@ const GridTerminal = ({ tileId, cwd, cols, rows, active, visible, k, restartKey 
     dirtyRef.current = true;
   }, [k, visible]);
 
-  const restartMounted = React.useRef(false);
+  const lastRestartRef = React.useRef(restartKey);
   React.useEffect(() => {
-    if (!restartMounted.current) {
-      restartMounted.current = true;
-      return;
-    }
+    if (lastRestartRef.current === restartKey) return;
+    lastRestartRef.current = restartKey;
     const ws = wsRef.current;
     if (!ws) return;
     pendingResumeRef.current = true;
