@@ -8,6 +8,7 @@ export interface PtyReadyInfo {
   reused: boolean;
   cols: number;
   rows: number;
+  resumeId: string | null;
 }
 
 export interface PtyConnectionParams {
@@ -57,7 +58,7 @@ export const openPtyConnection = (params: PtyConnectionParams, handlers: PtyHand
   ws.onmessage = (e) => {
     if (typeof e.data === 'string') {
       const msg = JSON.parse(e.data) as PtyServerMessage;
-      if (msg.t === 'ready') handlers.onReady({ reused: msg.reused, cols: msg.cols, rows: msg.rows });
+      if (msg.t === 'ready') handlers.onReady({ reused: msg.reused, cols: msg.cols, rows: msg.rows, resumeId: msg.resumeId });
       else if (msg.t === 'exit') handlers.onExit();
       return;
     }
@@ -77,4 +78,8 @@ export const sendPtyResize = (ws: WebSocket, cols: number, rows: number): void =
 
 export const sendPtyScroll = (ws: WebSocket, rows: number): void => {
   if (ws.readyState === WebSocket.OPEN) ws.send(JSON.stringify({ t: 'scroll', rows }));
+};
+
+export const sendPtyKill = (ws: WebSocket): void => {
+  if (ws.readyState === WebSocket.OPEN) ws.send(JSON.stringify({ t: 'kill' }));
 };

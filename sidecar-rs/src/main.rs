@@ -101,6 +101,125 @@ fn flush_session(s: &Session) {
     }
 }
 
+fn panorama_dir() -> Option<std::path::PathBuf> {
+    let home = std::env::var("USERPROFILE")
+        .ok()
+        .or_else(|| std::env::var("HOME").ok())?;
+    Some(Path::new(&home).join(".panorama"))
+}
+
+fn sanitize_key(key: &str) -> String {
+    let mut name = String::with_capacity(key.len());
+    for ch in key.chars() {
+        if ch.is_ascii_alphanumeric() || ch == '-' || ch == '_' {
+            name.push(ch);
+        } else {
+            name.push('_');
+        }
+    }
+    name
+}
+
+fn binding_path(tile_id: &str) -> Option<std::path::PathBuf> {
+    let dir = panorama_dir()?.join("agent-bindings");
+    std::fs::create_dir_all(&dir).ok()?;
+    Some(dir.join(format!("{}.json", sanitize_key(tile_id))))
+}
+
+fn read_binding(tile_id: &str) -> Option<String> {
+    let raw = std::fs::read_to_string(binding_path(tile_id)?).ok()?;
+    let v: serde_json::Value = serde_json::from_str(&raw).ok()?;
+    v.get("agentSessionId")
+        .and_then(|s| s.as_str())
+        .map(|s| s.to_string())
+}
+
+fn record_agent() {
+    let mut input = String::new();
+    let _ = std::io::stdin().read_to_string(&mut input);
+    let evt: serde_json::Value = serde_json::from_str(&input).unwrap_or(serde_json::Value::Null);
+    let session_id = evt.get("session_id").and_then(|s| s.as_str());
+    let tile_id = std::env::var("PANORAMA_TILE_ID").ok();
+    if let (Some(session_id), Some(tile_id)) = (session_id, tile_id) {
+        if let Some(path) = binding_path(&tile_id) {
+            let cwd = evt.get("cwd").and_then(|s| s.as_str());
+            let rec = serde_json::json!({
+                "agentSessionId": session_id,
+                "cwd": cwd,
+                "tileId": tile_id,
+            });
+            let _ = std::fs::write(path, rec.to_string());
+        }
+    }
+}
+
+fn install_claude_hook() {
+    let Some(home) = std::env::var("USERPROFILE")
+        .ok()
+        .or_else(|| std::env::var("HOME").ok())
+    else {
+        return;
+    };
+    let claude_dir = Path::new(&home).join(".claude");
+    if !claude_dir.exists() {
+        return;
+    }
+    let Ok(exe) = std::env::current_exe() else {
+        return;
+    };
+    let command = format!("\"{}\" record-agent", exe.display());
+    let file = claude_dir.join("settings.json");
+
+    let mut json: serde_json::Value = std::fs::read_to_string(&file)
+        .ok()
+        .and_then(|s| serde_json::from_str(&s).ok())
+        .unwrap_or_else(|| serde_json::json!({}));
+    if !json.is_object() {
+        json = serde_json::json!({});
+    }
+
+    let hooks = json
+        .as_object_mut()
+        .unwrap()
+        .entry("hooks")
+        .or_insert_with(|| serde_json::json!({}));
+    if !hooks.is_object() {
+        *hooks = serde_json::json!({});
+    }
+    let hooks = hooks.as_object_mut().unwrap();
+
+    let existing = hooks
+        .get("SessionStart")
+        .and_then(|v| v.as_array())
+        .cloned()
+        .unwrap_or_default();
+    let mut cleaned: Vec<serde_json::Value> = existing
+        .into_iter()
+        .filter(|entry| {
+            !entry
+                .get("hooks")
+                .and_then(|h| h.as_array())
+                .map(|arr| {
+                    arr.iter().any(|h| {
+                        h.get("command")
+                            .and_then(|c| c.as_str())
+                            .map(|c| c.contains("record-agent"))
+                            .unwrap_or(false)
+                    })
+                })
+                .unwrap_or(false)
+        })
+        .collect();
+    cleaned.push(serde_json::json!({
+        "hooks": [ { "type": "command", "command": command } ]
+    }));
+    hooks.insert("SessionStart".into(), serde_json::Value::Array(cleaned));
+
+    if let Ok(text) = serde_json::to_string_pretty(&json) {
+        let _ = std::fs::write(&file, text);
+    }
+}
+
 fn utf8_valid_len(data: &[u8]) -> usize {
     match std::str::from_utf8(data) {
         Ok(_) => data.len(),
@@ -679,12 +798,14 @@ async fn handle_ws(ws: WebSocketStream<TcpStream>, params: Params) {
     };
     resize_session(&session, params.cols, params.rows);
 
-    let ready = format!(
-        "{{\"t\":\"ready\",\"cols\":{},\"rows\":{},\"reused\":{}}}",
-        session.cols.load(Ordering::Relaxed),
-        session.rows.load(Ordering::Relaxed),
-        reused
-    );
+    let ready = serde_json::json!({
+        "t": "ready",
+        "cols": session.cols.load(Ordering::Relaxed),
+        "rows": session.rows.load(Ordering::Relaxed),
+        "reused": reused,
+        "resumeId": read_binding(&params.tile_id),
+    })
+    .to_string();
     if tx.send(Message::Text(ready)).await.is_err() {
         return;
     }
@@ -919,6 +1040,11 @@ async fn handle_conn(mut stream: TcpStream) {
 
 #[tokio::main]
 async fn main() {
+    if std::env::args().nth(1).as_deref() == Some("record-agent") {
+        record_agent();
+        return;
+    }
+    install_claude_hook();
     let listener = TcpListener::bind(("127.0.0.1", PORT))
         .await
         .expect("bind 9777");

@@ -3,6 +3,7 @@ export interface PtyReadyMessage {
   reused: boolean;
   cols: number;
   rows: number;
+  resumeId: string | null;
 }
 
 export interface PtyExitMessage {

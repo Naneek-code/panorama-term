@@ -6,7 +6,7 @@ import { TERMINAL_TARGET_KEY } from '~/usecase/util/terminalTarget';
 import { keyToBytes } from '~/usecase/util/terminalKeys';
 import { orderSel, selectText, lineSelection, wordSelection } from '~/usecase/util/terminalSelection';
 import { readClipboard, writeClipboard, hasClipboardImage } from '~/adapter/clipboard/clipboard.client';
-import { sendPtyInput, sendPtyScroll, sendPtyResize, openPtyConnection } from '~/adapter/pty/pty.client';
+import { sendPtyKill, sendPtyInput, sendPtyScroll, sendPtyResize, openPtyConnection } from '~/adapter/pty/pty.client';
 
 import type { GridFrame } from '~/domain/interfaces/pty.interface';
 import type { Cell, Selection } from '~/usecase/util/terminalSelection';
@@ -21,6 +21,7 @@ interface GridTerminalProps {
   active: boolean;
   visible: boolean;
   k: number;
+  restartKey: number;
 }
 
 const FONT = 12;
@@ -52,7 +53,7 @@ const ensureFont = (): Promise<void> => {
 
 const hex = (v: number): string => '#' + (v & 0xffffff).toString(16).padStart(6, '0');
 
-const GridTerminal = ({ tileId, cwd, cols, rows, active, visible, k }: GridTerminalProps) => {
+const GridTerminal = ({ tileId, cwd, cols, rows, active, visible, k, restartKey }: GridTerminalProps) => {
   const canvasRef = React.useRef<HTMLCanvasElement>(null);
   const wsRef = React.useRef<WebSocket | null>(null);
   const frameRef = React.useRef<GridFrame | null>(null);
@@ -62,6 +63,7 @@ const GridTerminal = ({ tileId, cwd, cols, rows, active, visible, k }: GridTermi
   const selRef = React.useRef<Selection | null>(null);
   const selectingRef = React.useRef(false);
   const clickRef = React.useRef({ t: 0, row: -1, col: -1, count: 0 });
+  const pendingResumeRef = React.useRef(false);
   const activeRef = React.useRef(active);
   const visibleRef = React.useRef(visible);
   const kRef = React.useRef(k);
@@ -174,7 +176,15 @@ const GridTerminal = ({ tileId, cwd, cols, rows, active, visible, k }: GridTermi
             dirtyRef.current = true;
           },
           onExit: () => {},
-          onReady: () => {}
+          onReady: (info) => {
+            if (!pendingResumeRef.current || !info.resumeId) return;
+            pendingResumeRef.current = false;
+            const id = info.resumeId;
+            setTimeout(() => {
+              const w = wsRef.current;
+              if (w) sendPtyInput(w, `claude --resume ${id}\r`);
+            }, 900);
+          }
         }
       );
       wsRef.current = ws;
@@ -202,6 +212,19 @@ const GridTerminal = ({ tileId, cwd, cols, rows, active, visible, k }: GridTermi
   React.useEffect(() => {
     dirtyRef.current = true;
   }, [k, visible]);
+
+  const restartMounted = React.useRef(false);
+  React.useEffect(() => {
+    if (!restartMounted.current) {
+      restartMounted.current = true;
+      return;
+    }
+    const ws = wsRef.current;
+    if (!ws) return;
+    pendingResumeRef.current = true;
+    sendPtyKill(ws);
+    ws.close();
+  }, [restartKey]);
 
   React.useEffect(() => {
     blinkRef.current = true;
