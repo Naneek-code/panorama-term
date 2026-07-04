@@ -29,6 +29,7 @@ const CELL_H = 15;
 const PAINT_MS = 60;
 const CLICK_MS = 400;
 const BG = '#0b0e14';
+const QUAD = [0b0010, 0b0001, 0b1000, 0b1011, 0b1001, 0b1110, 0b1101, 0b0100, 0b0110, 0b0111];
 
 let cellW = 7.23;
 let fontReady = false;
@@ -118,6 +119,41 @@ const GridTerminal = ({ tileId, cwd, cols, rows, active, visible, k, restartKey 
     ctx.textBaseline = 'top';
     const snap = (v: number) => Math.round(v * scale) / scale;
 
+    const drawBlock = (cp: number, c: number, r: number) => {
+      const x0 = snap(c * cellW);
+      const x1 = snap((c + 1) * cellW);
+      const y0 = snap(r * CELL_H);
+      const y1 = snap((r + 1) * CELL_H);
+      const xm = snap(c * cellW + cellW / 2);
+      const ym = snap(r * CELL_H + CELL_H / 2);
+      const rect = (l: number, t: number, rt: number, b: number) => ctx.fillRect(l, t, rt - l, b - t);
+      if (cp === 0x2588) return rect(x0, y0, x1, y1);
+      if (cp === 0x2580) return rect(x0, y0, x1, ym);
+      if (cp === 0x2590) return rect(xm, y0, x1, y1);
+      if (cp === 0x2594) return rect(x0, y0, x1, snap(r * CELL_H + CELL_H / 8));
+      if (cp === 0x2595) return rect(snap(c * cellW + (cellW * 7) / 8), y0, x1, y1);
+      if (cp >= 0x2581 && cp <= 0x2587) {
+        return rect(x0, snap(r * CELL_H + CELL_H * (1 - (cp - 0x2580) / 8)), x1, y1);
+      }
+      if (cp >= 0x2589 && cp <= 0x258f) {
+        return rect(x0, y0, snap(c * cellW + (cellW * (0x2590 - cp)) / 8), y1);
+      }
+      if (cp >= 0x2591 && cp <= 0x2593) {
+        ctx.save();
+        ctx.globalAlpha = (cp - 0x2590) / 4;
+        rect(x0, y0, x1, y1);
+        ctx.restore();
+        return;
+      }
+      if (cp >= 0x2596 && cp <= 0x259f) {
+        const q = QUAD[cp - 0x2596];
+        if (q & 8) rect(x0, y0, xm, ym);
+        if (q & 4) rect(xm, y0, x1, ym);
+        if (q & 2) rect(x0, ym, xm, y1);
+        if (q & 1) rect(xm, ym, x1, y1);
+      }
+    };
+
     const lines = frame.lines;
     const attrs = frame.attrs;
     const yOff = (CELL_H - FONT) / 2;
@@ -134,11 +170,16 @@ const GridTerminal = ({ tileId, cwd, cols, rows, active, visible, k, restartKey 
         }
         const ch = cells[c];
         if (ch && ch !== ' ') {
-          ctx.font = `${w0 & (1 << 24) ? 'bold ' : ''}${FONT}px Hack, monospace`;
-          ctx.fillStyle = hex(w0);
           const cp = ch.codePointAt(0) ?? 0;
-          const box = cp >= 0x2500 && cp <= 0x259f;
-          ctx.fillText(ch, box ? c * cellW : snap(c * cellW), box ? r * CELL_H + yOff : snap(r * CELL_H + yOff));
+          if (cp >= 0x2580 && cp <= 0x259f) {
+            ctx.fillStyle = hex(w0);
+            drawBlock(cp, c, r);
+          } else {
+            ctx.font = `${w0 & (1 << 24) ? 'bold ' : ''}${FONT}px Hack, monospace`;
+            ctx.fillStyle = hex(w0);
+            const box = cp >= 0x2500 && cp <= 0x257f;
+            ctx.fillText(ch, box ? c * cellW : snap(c * cellW), box ? r * CELL_H + yOff : snap(r * CELL_H + yOff));
+          }
         }
       }
     }
