@@ -101,6 +101,14 @@ fn flush_session(s: &Session) {
     }
 }
 
+fn utf8_valid_len(data: &[u8]) -> usize {
+    match std::str::from_utf8(data) {
+        Ok(_) => data.len(),
+        Err(e) if e.error_len().is_none() => e.valid_up_to(),
+        Err(_) => data.len(),
+    }
+}
+
 fn display_command_name(raw: &str) -> String {
     let raw = raw.trim();
     let base = Path::new(raw)
@@ -428,16 +436,28 @@ fn spawn_session(
         let mut permit = Some(permit);
         let mut reader = reader;
         let mut buf = [0u8; 8192];
+        let mut carry: Vec<u8> = Vec::new();
         loop {
             match reader.read(&mut buf) {
                 Ok(0) | Err(_) => break,
                 Ok(n) => {
                     permit.take();
+                    let mut data = Vec::with_capacity(carry.len() + n);
+                    data.append(&mut carry);
+                    data.extend_from_slice(&buf[..n]);
+                    let valid = utf8_valid_len(&data);
+                    if valid < data.len() {
+                        carry.extend_from_slice(&data[valid..]);
+                    }
+                    let chunk = &data[..valid];
+                    if chunk.is_empty() {
+                        continue;
+                    }
                     if let Ok(mut parser) = s.parser.lock() {
-                        parser.process(&buf[..n]);
+                        parser.process(chunk);
                     }
                     if let Ok(mut raw) = s.raw.lock() {
-                        raw.extend_from_slice(&buf[..n]);
+                        raw.extend_from_slice(chunk);
                         if raw.len() > RAW_CAP {
                             let cut = raw.len() - RAW_CAP;
                             raw.drain(0..cut);
@@ -923,5 +943,32 @@ async fn main() {
             }
             Err(_) => continue,
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::utf8_valid_len;
+
+    #[test]
+    fn multibyte_split_across_reads_reassembles() {
+        let text = "via \u{f0} v1 \u{2601}\u{fe0f}".as_bytes();
+        let mut carry: Vec<u8> = Vec::new();
+        let mut out: Vec<u8> = Vec::new();
+        for byte in text {
+            let mut data = std::mem::take(&mut carry);
+            data.push(*byte);
+            let valid = utf8_valid_len(&data);
+            carry.extend_from_slice(&data[valid..]);
+            out.extend_from_slice(&data[..valid]);
+            assert!(std::str::from_utf8(&data[..valid]).is_ok());
+        }
+        assert!(carry.is_empty());
+        assert_eq!(out, text);
+    }
+
+    #[test]
+    fn genuine_invalid_byte_not_held() {
+        assert_eq!(utf8_valid_len(&[0xff, 0xfe]), 2);
     }
 }
