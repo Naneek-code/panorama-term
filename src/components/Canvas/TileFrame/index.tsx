@@ -1,5 +1,5 @@
 import React from 'react';
-import { X } from 'lucide-react';
+import { X, RotateCw } from 'lucide-react';
 
 import type { Tile, View } from '~/domain/interfaces/canvas.interface';
 import GridTerminal from '~/components/Terminal/GridTerminal';
@@ -64,6 +64,8 @@ const TileFrame = ({ tile, view, active, visible, live, onMove, onSnap, onClose,
     onSnap(tile.id);
   };
 
+  const [restartKey, setRestartKey] = React.useState(0);
+  const restartTile = () => setRestartKey((n) => n + 1);
   const closeTile = () => onClose(tile.id);
   const label = tile.userTitle || tile.autoTitle || `${tile.type} · ${tile.id}`;
 
@@ -92,9 +94,14 @@ const TileFrame = ({ tile, view, active, visible, live, onMove, onSnap, onClose,
         onPointerCancel={endDrag}
       >
         <span className={styles.title}>{label}</span>
-        <button className={styles.close} onClick={closeTile} aria-label="Close tile">
-          <X size={14} strokeWidth={2} />
-        </button>
+        <div className={styles.actions}>
+          <button className={styles.action} onClick={restartTile} aria-label="Restart terminal">
+            <RotateCw size={13} strokeWidth={2} />
+          </button>
+          <button className={`${styles.action} ${styles.close}`} onClick={closeTile} aria-label="Close tile">
+            <X size={14} strokeWidth={2} />
+          </button>
+        </div>
       </div>
       <div className={styles.body}>
         {tile.type !== 'term' ? (
@@ -103,6 +110,7 @@ const TileFrame = ({ tile, view, active, visible, live, onMove, onSnap, onClose,
           <GridTerminal
             k={k}
             cwd={tile.cwd}
+            restartKey={restartKey}
             active={active}
             visible={visible}
             tileId={tile.id}
