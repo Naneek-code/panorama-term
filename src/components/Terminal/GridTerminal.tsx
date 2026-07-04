@@ -5,7 +5,7 @@ import { scheduleConnect } from '~/usecase/util/connectScheduler';
 import { TERMINAL_TARGET_KEY } from '~/usecase/util/terminalTarget';
 import { keyToBytes } from '~/usecase/util/terminalKeys';
 import { orderSel, selectText, lineSelection, wordSelection } from '~/usecase/util/terminalSelection';
-import { readClipboard, writeClipboard } from '~/adapter/clipboard/clipboard.client';
+import { readClipboard, writeClipboard, hasClipboardImage } from '~/adapter/clipboard/clipboard.client';
 import { sendPtyInput, sendPtyScroll, sendPtyResize, openPtyConnection } from '~/adapter/pty/pty.client';
 
 import type { GridFrame } from '~/domain/interfaces/pty.interface';
@@ -241,11 +241,18 @@ const GridTerminal = ({ tileId, cwd, cols, rows, active, visible, k }: GridTermi
     if (text) writeClipboard(text);
   };
 
+  const pasteText = (ws: WebSocket) => {
+    void readClipboard().then((t) => {
+      if (t) sendPtyInput(ws, t.replace(/\r\n/g, '\r').replace(/\n/g, '\r'));
+    });
+  };
+
   const paste = () => {
     const ws = wsRef.current;
     if (!ws) return;
-    void readClipboard().then((t) => {
-      if (t) sendPtyInput(ws, t.replace(/\r\n/g, '\r').replace(/\n/g, '\r'));
+    void hasClipboardImage().then((hasImage) => {
+      if (hasImage) sendPtyInput(ws, '\x1bv');
+      else pasteText(ws);
     });
   };
 
@@ -308,7 +315,7 @@ const GridTerminal = ({ tileId, cwd, cols, rows, active, visible, k }: GridTermi
       copySelection();
       return;
     }
-    if (mod && e.shiftKey && key === 'v') {
+    if (mod && key === 'v') {
       e.preventDefault();
       paste();
       return;
