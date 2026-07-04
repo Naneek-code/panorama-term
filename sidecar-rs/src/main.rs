@@ -49,6 +49,16 @@ fn color_rgb(c: vt100::Color) -> Option<u32> {
     }
 }
 
+const DIM_MIX: f32 = 0.55;
+
+fn blend(a: u32, b: u32, t: f32) -> u32 {
+    let mix = |sa: u32, sb: u32| ((sa as f32 * (1.0 - t) + sb as f32 * t).round() as u32) & 0xFF;
+    let r = mix((a >> 16) & 0xFF, (b >> 16) & 0xFF);
+    let g = mix((a >> 8) & 0xFF, (b >> 8) & 0xFF);
+    let bl = mix(a & 0xFF, b & 0xFF);
+    (r << 16) | (g << 8) | bl
+}
+
 const SCROLLBACK_LINES: usize = 5000;
 const RAW_CAP: usize = 256 * 1024;
 
@@ -283,7 +293,7 @@ fn capture_text(raw: &[u8], cols: u16, lines: usize) -> String {
         let mut line = String::new();
         for c in 0..cols {
             match screen.cell(r, c) {
-                Some(cell) if !cell.contents().is_empty() => line.push_str(&cell.contents()),
+                Some(cell) if !cell.contents().is_empty() => line.push_str(cell.contents()),
                 _ => line.push(' '),
             }
         }
@@ -645,7 +655,11 @@ fn resize_session(s: &Session, cols: u16, rows: u16) {
             pixel_height: 0,
         });
     }
-    s.parser.lock().unwrap_or_else(|e| e.into_inner()).set_size(rows, cols);
+    s.parser
+        .lock()
+        .unwrap_or_else(|e| e.into_inner())
+        .screen_mut()
+        .set_size(rows, cols);
     s.dirty.store(true, Ordering::Relaxed);
 }
 
@@ -701,7 +715,7 @@ fn scroll_session(s: &Session, dir: i64, lines: usize, col: usize, row: usize) {
     let desired = (cur + dir * lines as i64).max(0) as usize;
     let actual = {
         let mut parser = s.parser.lock().unwrap_or_else(|e| e.into_inner());
-        parser.set_scrollback(desired);
+        parser.screen_mut().set_scrollback(desired);
         parser.screen().scrollback()
     };
     s.scrollback.store(actual, Ordering::Relaxed);
@@ -743,7 +757,9 @@ fn kill_session(s: &Arc<Session>) {
 
 fn build_frame(s: &Session) -> Vec<u8> {
     let mut parser = s.parser.lock().unwrap_or_else(|e| e.into_inner());
-    parser.set_scrollback(s.scrollback.load(Ordering::Relaxed));
+    parser
+        .screen_mut()
+        .set_scrollback(s.scrollback.load(Ordering::Relaxed));
     let screen = parser.screen();
     let offset = screen.scrollback() as u16;
     let (rows, cols) = screen.size();
@@ -754,7 +770,7 @@ fn build_frame(s: &Session) -> Vec<u8> {
         for c in 0..cols {
             let cell = screen.cell(r, c);
             match cell {
-                Some(cell) if !cell.contents().is_empty() => text.push_str(&cell.contents()),
+                Some(cell) if !cell.contents().is_empty() => text.push_str(cell.contents()),
                 _ => text.push(' '),
             }
             let (mut fg, mut bg, mut flags) = (DEFAULT_FG, None::<u32>, 0u32);
@@ -774,6 +790,9 @@ fn build_frame(s: &Session) -> Vec<u8> {
                     let real_bg = bg.unwrap_or(DEFAULT_BG);
                     bg = Some(fg);
                     fg = real_bg;
+                }
+                if cell.dim() {
+                    fg = blend(fg, bg.unwrap_or(DEFAULT_BG), DIM_MIX);
                 }
             }
             attrs.push((fg & 0x00FF_FFFF) | (flags << 24));
