@@ -3,6 +3,7 @@ import React from 'react';
 import { getSetting } from '~/adapter/settings/settings.client';
 import { scheduleConnect } from '~/usecase/util/connectScheduler';
 import { TERMINAL_TARGET_KEY } from '~/usecase/util/terminalTarget';
+import { keyToBytes } from '~/usecase/util/terminalKeys';
 import { orderSel, selectText, lineSelection, wordSelection } from '~/usecase/util/terminalSelection';
 import { readClipboard, writeClipboard } from '~/adapter/clipboard/clipboard.client';
 import { sendPtyInput, sendPtyScroll, sendPtyResize, openPtyConnection } from '~/adapter/pty/pty.client';
@@ -50,47 +51,6 @@ const ensureFont = (): Promise<void> => {
 };
 
 const hex = (v: number): string => '#' + (v & 0xffffff).toString(16).padStart(6, '0');
-
-const keyToBytes = (e: React.KeyboardEvent): string | null => {
-  const { key, ctrlKey, altKey, metaKey } = e;
-  if (metaKey) return null;
-  if (ctrlKey && !altKey && key.length === 1) {
-    const u = key.toUpperCase();
-    if (u >= 'A' && u <= 'Z') return String.fromCharCode(u.charCodeAt(0) - 64);
-    if (u === ' ') return '\x00';
-  }
-  switch (key) {
-    case 'Enter':
-      return '\r';
-    case 'Backspace':
-      return '\x7f';
-    case 'Tab':
-      return '\t';
-    case 'Escape':
-      return '\x1b';
-    case 'ArrowUp':
-      return '\x1b[A';
-    case 'ArrowDown':
-      return '\x1b[B';
-    case 'ArrowRight':
-      return '\x1b[C';
-    case 'ArrowLeft':
-      return '\x1b[D';
-    case 'Home':
-      return '\x1b[H';
-    case 'End':
-      return '\x1b[F';
-    case 'Delete':
-      return '\x1b[3~';
-    case 'PageUp':
-      return '\x1b[5~';
-    case 'PageDown':
-      return '\x1b[6~';
-    default:
-      if (key.length === 1 && !ctrlKey) return altKey ? '\x1b' + key : key;
-      return null;
-  }
-};
 
 const GridTerminal = ({ tileId, cwd, cols, rows, active, visible, k }: GridTerminalProps) => {
   const canvasRef = React.useRef<HTMLCanvasElement>(null);
