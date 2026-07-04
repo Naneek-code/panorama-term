@@ -30,7 +30,7 @@ export const keyToBytes = (e: KeyEvent): string | null => {
   if (key === 'Backspace') return ctrlKey || altKey ? '\x1b\x7f' : '\x7f';
   if (key === 'Delete' && ctrlKey) return '\x1bd';
   if (key === 'Tab') return shiftKey ? '\x1b[Z' : '\t';
-  if (key === 'Enter') return '\r';
+  if (key === 'Enter') return shiftKey && !ctrlKey && !altKey ? '\x1b\r' : '\r';
   if (key === 'Escape') return '\x1b';
 
   const fin = CSI_FINAL[key];

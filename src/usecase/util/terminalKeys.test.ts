@@ -46,6 +46,11 @@ test('shift+tab is backtab', () => {
   expect(keyToBytes(ev('Tab', { shift: true }))).toBe('\x1b[Z');
 });
 
+test('enter is CR, shift+enter is ESC CR for newline', () => {
+  expect(keyToBytes(ev('Enter'))).toBe('\r');
+  expect(keyToBytes(ev('Enter', { shift: true }))).toBe('\x1b\r');
+});
+
 test('control letters and meta passthrough', () => {
   expect(keyToBytes(ev('c', { ctrl: true }))).toBe('\x03');
   expect(keyToBytes(ev('a'))).toBe('a');
