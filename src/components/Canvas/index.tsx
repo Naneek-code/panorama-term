@@ -1,6 +1,7 @@
 import React from 'react';
 import { SquareTerminal } from 'lucide-react';
 
+import Minimap from '~/components/Canvas/Minimap';
 import TileFrame from '~/components/Canvas/TileFrame';
 import ContextMenu from '~/components/commons/ContextMenu';
 import { useCanvas } from '~/usecase/hooks/useCanvas';
@@ -21,6 +22,7 @@ const Canvas = () => {
   const {
     view,
     tiles,
+    panTo,
     bgRef,
     endPan,
     addTile,
@@ -112,6 +114,7 @@ const Canvas = () => {
         <div ref={indicatorRef} className={styles.indicator}>
           100%
         </div>
+        <Minimap view={view} tiles={tiles} viewportRef={bgRef} onPan={panTo} />
       </div>
       {menu && (
         <ContextMenu

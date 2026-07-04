@@ -291,9 +291,12 @@ export const useCanvas = ({ seed, onPersist }: UseCanvasArgs) => {
 
   const activateTile = React.useCallback((id: string) => setActiveTile(id), []);
 
+  const panTo = React.useCallback((x: number, y: number) => setView((v) => ({ ...v, x, y })), []);
+
   return {
     view,
     tiles,
+    panTo,
     bgRef,
     endPan,
     gridRef,
