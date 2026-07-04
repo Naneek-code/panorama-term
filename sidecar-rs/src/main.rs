@@ -50,18 +50,125 @@ fn color_rgb(c: vt100::Color) -> Option<u32> {
 }
 
 const SCROLLBACK_LINES: usize = 5000;
+const RAW_CAP: usize = 256 * 1024;
 
 struct Session {
     tile_id: String,
+    shell: String,
     parser: Mutex<vt100::Parser>,
     writer: Mutex<Box<dyn Write + Send>>,
     master: Mutex<Box<dyn portable_pty::MasterPty + Send>>,
     child: Mutex<Box<dyn portable_pty::Child + Send + Sync>>,
+    raw: Mutex<Vec<u8>>,
     dirty: AtomicBool,
+    raw_dirty: AtomicBool,
     exited: AtomicBool,
     cols: AtomicU16,
     rows: AtomicU16,
     scrollback: AtomicUsize,
+}
+
+fn buffer_path(tile_id: &str) -> Option<std::path::PathBuf> {
+    let home = std::env::var("USERPROFILE")
+        .ok()
+        .or_else(|| std::env::var("HOME").ok())?;
+    let dir = Path::new(&home).join(".panorama").join("pty-buffers");
+    std::fs::create_dir_all(&dir).ok()?;
+    let mut name = String::with_capacity(tile_id.len());
+    for ch in tile_id.chars() {
+        if ch.is_ascii_alphanumeric() || ch == '-' || ch == '_' {
+            name.push(ch);
+        } else {
+            name.push('_');
+        }
+    }
+    Some(dir.join(format!("{name}.raw")))
+}
+
+fn load_buffer(tile_id: &str) -> Vec<u8> {
+    buffer_path(tile_id)
+        .and_then(|p| std::fs::read(p).ok())
+        .unwrap_or_default()
+}
+
+fn flush_session(s: &Session) {
+    if !s.raw_dirty.swap(false, Ordering::Relaxed) {
+        return;
+    }
+    let data = s.raw.lock().map(|r| r.clone()).unwrap_or_default();
+    if let Some(p) = buffer_path(&s.tile_id) {
+        let _ = std::fs::write(p, &data);
+    }
+}
+
+fn display_command_name(raw: &str) -> String {
+    let raw = raw.trim();
+    let base = Path::new(raw)
+        .file_name()
+        .and_then(|s| s.to_str())
+        .unwrap_or(raw);
+    let lower = base.to_ascii_lowercase();
+    if let Some(stripped) = lower.strip_suffix(".exe") {
+        base[..stripped.len()].to_string()
+    } else {
+        base.to_string()
+    }
+}
+
+#[cfg(windows)]
+fn foreground_command(pid: u32) -> Option<String> {
+    let script = format!(
+        "$c = Get-CimInstance Win32_Process -Filter \"ParentProcessId = {pid}\" | Sort-Object ProcessId; if ($c) {{ ($c | Select-Object -Last 1).Name }}"
+    );
+    let out = hidden_command(&resolve_powershell())
+        .args(["-NoProfile", "-NonInteractive", "-Command", &script])
+        .stdin(std::process::Stdio::null())
+        .output()
+        .ok()?;
+    let name = String::from_utf8_lossy(&out.stdout).trim().to_string();
+    if name.is_empty() {
+        None
+    } else {
+        Some(display_command_name(&name))
+    }
+}
+
+#[cfg(unix)]
+fn foreground_command(pid: u32) -> Option<String> {
+    let out = hidden_command("ps")
+        .args(["-o", "comm=", "-g", &pid.to_string()])
+        .stdin(std::process::Stdio::null())
+        .output()
+        .ok()?;
+    let text = String::from_utf8_lossy(&out.stdout);
+    let last = text.lines().filter(|l| !l.trim().is_empty()).last()?;
+    Some(display_command_name(last))
+}
+
+fn capture_text(raw: &[u8], cols: u16, lines: usize) -> String {
+    let rows = lines.clamp(1, SCROLLBACK_LINES) as u16;
+    let cols = cols.max(2);
+    let mut p = vt100::Parser::new(rows, cols, 0);
+    p.process(raw);
+    let screen = p.screen();
+    let mut out: Vec<String> = Vec::with_capacity(rows as usize);
+    for r in 0..rows {
+        let mut line = String::new();
+        for c in 0..cols {
+            match screen.cell(r, c) {
+                Some(cell) if !cell.contents().is_empty() => line.push_str(&cell.contents()),
+                _ => line.push(' '),
+            }
+        }
+        while line.ends_with(' ') {
+            line.pop();
+        }
+        out.push(line);
+    }
+    while out.last().map(|l| l.is_empty()).unwrap_or(false) {
+        out.pop();
+    }
+    out.join("\n")
 }
 
 fn sessions() -> &'static Mutex<HashMap<String, Arc<Session>>> {
@@ -251,7 +358,10 @@ fn inject_osc7(session: &Arc<Session>, shell: &str) {
     }
 }
 
-fn spawn_session(p: &Params, permit: tokio::sync::OwnedSemaphorePermit) -> Arc<Session> {
+fn spawn_session(
+    p: &Params,
+    permit: tokio::sync::OwnedSemaphorePermit,
+) -> Result<Arc<Session>, String> {
     let shell = resolve_target(p.target.as_deref())
         .or_else(|| p.shell.clone())
         .unwrap_or_else(default_shell);
@@ -272,7 +382,7 @@ fn spawn_session(p: &Params, permit: tokio::sync::OwnedSemaphorePermit) -> Arc<S
             pixel_width: 0,
             pixel_height: 0,
         })
-        .expect("openpty");
+        .map_err(|e| format!("openpty: {e}"))?;
 
     let mut cmd = CommandBuilder::new(&shell);
     cmd.cwd(&cwd);
@@ -280,18 +390,33 @@ fn spawn_session(p: &Params, permit: tokio::sync::OwnedSemaphorePermit) -> Arc<S
     cmd.env("PANORAMA_TERMINAL", "1");
     cmd.env("PANORAMA_TILE_ID", &p.tile_id);
 
-    let child = pair.slave.spawn_command(cmd).expect("spawn");
-    let reader = pair.master.try_clone_reader().expect("reader");
-    let writer = pair.master.take_writer().expect("writer");
+    let child = pair
+        .slave
+        .spawn_command(cmd)
+        .map_err(|e| format!("spawn '{shell}': {e}"))?;
+    let reader = pair
+        .master
+        .try_clone_reader()
+        .map_err(|e| format!("reader: {e}"))?;
+    let writer = pair.master.take_writer().map_err(|e| format!("writer: {e}"))?;
     drop(pair.slave);
+
+    let seed = load_buffer(&p.tile_id);
+    let mut parser = vt100::Parser::new(rows, cols, SCROLLBACK_LINES);
+    if !seed.is_empty() {
+        parser.process(&seed);
+    }
 
     let session = Arc::new(Session {
         tile_id: p.tile_id.clone(),
-        parser: Mutex::new(vt100::Parser::new(rows, cols, SCROLLBACK_LINES)),
+        shell: shell.clone(),
+        parser: Mutex::new(parser),
         writer: Mutex::new(writer),
         master: Mutex::new(pair.master),
         child: Mutex::new(child),
+        raw: Mutex::new(seed),
         dirty: AtomicBool::new(true),
+        raw_dirty: AtomicBool::new(false),
         exited: AtomicBool::new(false),
         cols: AtomicU16::new(cols),
         rows: AtomicU16::new(rows),
@@ -311,17 +436,26 @@ fn spawn_session(p: &Params, permit: tokio::sync::OwnedSemaphorePermit) -> Arc<S
                     if let Ok(mut parser) = s.parser.lock() {
                         parser.process(&buf[..n]);
                     }
+                    if let Ok(mut raw) = s.raw.lock() {
+                        raw.extend_from_slice(&buf[..n]);
+                        if raw.len() > RAW_CAP {
+                            let cut = raw.len() - RAW_CAP;
+                            raw.drain(0..cut);
+                        }
+                    }
+                    s.raw_dirty.store(true, Ordering::Relaxed);
                     s.dirty.store(true, Ordering::Relaxed);
                 }
             }
         }
         s.exited.store(true, Ordering::Relaxed);
         s.dirty.store(true, Ordering::Relaxed);
+        flush_session(&s);
         sessions().lock().unwrap().remove(&s.tile_id);
     });
 
     inject_osc7(&session, &shell);
-    session
+    Ok(session)
 }
 
 const MAX_CONCURRENT_BOOT: usize = 3;
@@ -339,20 +473,23 @@ fn lookup_live(tile_id: &str) -> Option<Arc<Session>> {
         .cloned()
 }
 
-async fn get_or_create(p: &Params) -> Option<(Arc<Session>, bool)> {
+async fn get_or_create(p: &Params) -> Result<(Arc<Session>, bool), String> {
     if let Some(s) = lookup_live(&p.tile_id) {
-        return Some((s, true));
+        return Ok((s, true));
     }
-    let permit = spawn_sem().acquire_owned().await.ok()?;
+    let permit = spawn_sem()
+        .acquire_owned()
+        .await
+        .map_err(|e| e.to_string())?;
     if let Some(s) = lookup_live(&p.tile_id) {
-        return Some((s, true));
+        return Ok((s, true));
     }
     let params = p.clone();
     let s = tokio::task::spawn_blocking(move || spawn_session(&params, permit))
         .await
-        .ok()?;
+        .map_err(|e| format!("spawn task: {e}"))??;
     sessions().lock().unwrap().insert(p.tile_id.clone(), s.clone());
-    Some((s, false))
+    Ok((s, false))
 }
 
 fn resize_session(s: &Session, cols: u16, rows: u16) {
@@ -380,19 +517,32 @@ fn resize_session(s: &Session, cols: u16, rows: u16) {
 fn kill_session(s: &Arc<Session>) {
     let s = s.clone();
     std::thread::spawn(move || {
+        let pid = s.child.lock().ok().and_then(|c| c.process_id());
         #[cfg(windows)]
         {
-            let pid = s.child.lock().ok().and_then(|c| c.process_id());
             if let Some(pid) = pid {
                 let _ = hidden_command("taskkill.exe")
                     .args(["/PID", &pid.to_string(), "/T", "/F"])
                     .status();
             }
         }
+        #[cfg(unix)]
+        {
+            if let Some(pid) = pid {
+                unsafe {
+                    libc::killpg(pid as i32, libc::SIGTERM);
+                }
+                std::thread::sleep(Duration::from_millis(150));
+                unsafe {
+                    libc::killpg(pid as i32, libc::SIGKILL);
+                }
+            }
+        }
         if let Ok(mut c) = s.child.lock() {
             let _ = c.kill();
         }
         s.exited.store(true, Ordering::Relaxed);
+        flush_session(&s);
         sessions().lock().unwrap().remove(&s.tile_id);
     });
 }
@@ -500,8 +650,12 @@ fn handle_client_msg(s: &Arc<Session>, text: &str) {
 async fn handle_ws(ws: WebSocketStream<TcpStream>, params: Params) {
     let (mut tx, mut rx) = ws.split();
     let (session, reused) = match get_or_create(&params).await {
-        Some(v) => v,
-        None => return,
+        Ok(v) => v,
+        Err(e) => {
+            let msg = serde_json::json!({ "t": "error", "msg": e }).to_string();
+            let _ = tx.send(Message::Text(msg)).await;
+            return;
+        }
     };
     resize_session(&session, params.cols, params.rows);
 
@@ -674,6 +828,53 @@ async fn handle_conn(mut stream: TcpStream) {
         return;
     }
 
+    if path_only == "/capture" {
+        let q = parse_query(query);
+        let tid = q.get("tileId").cloned().unwrap_or_default();
+        let lines = q.get("lines").and_then(|l| l.parse().ok()).unwrap_or(1000usize);
+        let (raw, cols) = match sessions().lock().unwrap().get(&tid).cloned() {
+            Some(s) => (
+                s.raw.lock().map(|r| r.clone()).unwrap_or_default(),
+                s.cols.load(Ordering::Relaxed),
+            ),
+            None => (load_buffer(&tid), 80),
+        };
+        let text = capture_text(&raw, cols, lines);
+        let resp = format!(
+            "HTTP/1.1 200 OK\r\nAccess-Control-Allow-Origin: *\r\nContent-Type: text/plain; charset=utf-8\r\nContent-Length: {}\r\n\r\n{}",
+            text.len(),
+            text
+        );
+        let _ = stream.write_all(resp.as_bytes()).await;
+        return;
+    }
+
+    if path_only == "/foreground" {
+        let q = parse_query(query);
+        let tid = q.get("tileId").cloned().unwrap_or_default();
+        let s = sessions().lock().unwrap().get(&tid).cloned();
+        let name = match s {
+            Some(s) => {
+                let pid = s.child.lock().ok().and_then(|c| c.process_id());
+                let shell = s.shell.clone();
+                tokio::task::spawn_blocking(move || {
+                    pid.and_then(foreground_command)
+                        .unwrap_or_else(|| display_command_name(&shell))
+                })
+                .await
+                .unwrap_or_default()
+            }
+            None => String::new(),
+        };
+        let resp = format!(
+            "HTTP/1.1 200 OK\r\nAccess-Control-Allow-Origin: *\r\nContent-Type: text/plain; charset=utf-8\r\nContent-Length: {}\r\n\r\n{}",
+            name.len(),
+            name
+        );
+        let _ = stream.write_all(resp.as_bytes()).await;
+        return;
+    }
+
     let body = if path_only == "/kill" {
         let q = parse_query(query);
         if let Some(tid) = q.get("tileId") {
@@ -701,6 +902,19 @@ async fn main() {
     let listener = TcpListener::bind(("127.0.0.1", PORT))
         .await
         .expect("bind 9777");
+    tokio::spawn(async {
+        let mut tick = tokio::time::interval(Duration::from_secs(5));
+        loop {
+            tick.tick().await;
+            let list: Vec<Arc<Session>> = sessions().lock().unwrap().values().cloned().collect();
+            let _ = tokio::task::spawn_blocking(move || {
+                for s in list {
+                    flush_session(&s);
+                }
+            })
+            .await;
+        }
+    });
     loop {
         match listener.accept().await {
             Ok((stream, _)) => {
