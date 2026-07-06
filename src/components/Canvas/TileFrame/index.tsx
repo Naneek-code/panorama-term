@@ -86,7 +86,8 @@ const TileFrame = ({ tile, view, active, visible, live, onMove, onSnap, onClose,
         width: bodyW,
         height: bodyH,
         transform: `scale(${k})`,
-        transformOrigin: 'top left'
+        transformOrigin: 'top left',
+        zIndex: active ? 2 : 1
       }}
     >
       <div

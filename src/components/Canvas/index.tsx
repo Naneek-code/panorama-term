@@ -2,6 +2,7 @@ import React from 'react';
 import { SquareDashed, SquareTerminal } from 'lucide-react';
 
 import Frame from '~/components/Canvas/Frame';
+import FrameBar from '~/components/Canvas/FrameBar';
 import Minimap from '~/components/Canvas/Minimap';
 import TileFrame from '~/components/Canvas/TileFrame';
 import ContextMenu from '~/components/commons/ContextMenu';
@@ -74,6 +75,35 @@ const Canvas = () => {
     );
   };
 
+  const [receded, setReceded] = React.useState<Set<string>>(new Set());
+
+  const focused = tiles.find((t) => t.id === activeTile) ?? null;
+
+  const holds = (f: (typeof frames)[number]): boolean => {
+    if (!focused) return false;
+    const cx = focused.x + focused.width / 2;
+    const cy = focused.y + focused.height / 2;
+    return cx >= f.x && cx <= f.x + f.width && cy >= f.y && cy <= f.y + f.height;
+  };
+
+  React.useLayoutEffect(() => {
+    const bg = bgRef.current;
+    if (!bg) return;
+    const tileEl = focused && bg.querySelector(`[data-tile="${focused.id}"]`);
+    const next = new Set<string>();
+    if (tileEl) {
+      const tr = tileEl.getBoundingClientRect();
+      for (const f of frames) {
+        if (holds(f)) continue;
+        const barEl = bg.querySelector(`[data-frame-bar="${f.id}"]`);
+        if (!barEl) continue;
+        const br = barEl.getBoundingClientRect();
+        if (br.left < tr.right && br.right > tr.left && br.top < tr.bottom && br.bottom > tr.top) next.add(f.id);
+      }
+    }
+    setReceded((prev) => (prev.size === next.size && [...prev].every((id) => next.has(id)) ? prev : next));
+  });
+
   const closeMenu = () => setMenu(null);
 
   const openMenu = (e: React.MouseEvent) => {
@@ -107,18 +137,7 @@ const Canvas = () => {
       >
         <canvas ref={gridRef} className={styles.grid} />
         {frames.map((f) => (
-          <Frame
-            key={f.id}
-            frame={f}
-            view={view}
-            tiles={tiles}
-            onDrag={dragFrame}
-            onSnap={snapFrame}
-            onResize={resizeFrame}
-            onRemove={removeFrame}
-            onRename={renameFrame}
-            onRecolor={recolorFrame}
-          />
+          <Frame key={f.id} frame={f} view={view} onSnap={snapFrame} onResize={resizeFrame} />
         ))}
         {tiles.map((t) => {
           const vis = isVisible(t);
@@ -142,6 +161,19 @@ const Canvas = () => {
             />
           );
         })}
+        {frames.map((f) => (
+          <FrameBar
+            key={f.id}
+            frame={f}
+            view={view}
+            tiles={tiles}
+            recede={receded.has(f.id)}
+            onDrag={dragFrame}
+            onRemove={removeFrame}
+            onRename={renameFrame}
+            onRecolor={recolorFrame}
+          />
+        ))}
         <div ref={indicatorRef} className={styles.indicator}>
           100%
         </div>
