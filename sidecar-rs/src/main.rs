@@ -1,6 +1,6 @@
 use std::collections::{HashMap, HashSet};
-use std::io::{Read, Write};
-use std::path::Path;
+use std::io::{Read, Seek, SeekFrom, Write};
+use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, AtomicU16, AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex, OnceLock};
 use std::time::Duration;
@@ -186,6 +186,188 @@ fn read_binding(tile_id: &str) -> Option<String> {
     v.get("agentSessionId")
         .and_then(|s| s.as_str())
         .map(|s| s.to_string())
+}
+
+fn read_binding_rec(tile_id: &str) -> Option<serde_json::Value> {
+    let raw = std::fs::read_to_string(binding_path(tile_id)?).ok()?;
+    serde_json::from_str(&raw).ok()
+}
+
+fn claude_home() -> Option<PathBuf> {
+    let home = std::env::var("USERPROFILE")
+        .ok()
+        .or_else(|| std::env::var("HOME").ok())?;
+    Some(Path::new(&home).join(".claude"))
+}
+
+fn default_model() -> Option<String> {
+    let raw = std::fs::read_to_string(claude_home()?.join("settings.json")).ok()?;
+    let v: serde_json::Value = serde_json::from_str(&raw).ok()?;
+    v.get("model")
+        .and_then(|m| m.as_str())
+        .filter(|s| !s.is_empty())
+        .map(|s| s.to_string())
+}
+
+fn cwd_slug(cwd: &str) -> String {
+    cwd.chars()
+        .map(|c| if c.is_ascii_alphanumeric() || c == '-' { c } else { '-' })
+        .collect()
+}
+
+fn find_transcript(session_id: &str, cwd: Option<&str>) -> Option<PathBuf> {
+    let projects = claude_home()?.join("projects");
+    if let Some(cwd) = cwd {
+        let direct = projects.join(cwd_slug(cwd)).join(format!("{session_id}.jsonl"));
+        if direct.exists() {
+            return Some(direct);
+        }
+    }
+    for entry in std::fs::read_dir(&projects).ok()?.flatten() {
+        let candidate = entry.path().join(format!("{session_id}.jsonl"));
+        if candidate.exists() {
+            return Some(candidate);
+        }
+    }
+    None
+}
+
+fn usage_tokens(usage: &serde_json::Value) -> Option<u64> {
+    let get = |k: &str| usage.get(k).and_then(|v| v.as_u64()).unwrap_or(0);
+    let sum = get("input_tokens") + get("cache_read_input_tokens") + get("cache_creation_input_tokens");
+    (sum > 0).then_some(sum)
+}
+
+const TRANSCRIPT_SEED_CAP: u64 = 256 * 1024;
+
+#[derive(Default)]
+struct ClaudeTracker {
+    agent_id: Option<String>,
+    cwd: Option<String>,
+    path: Option<PathBuf>,
+    offset: u64,
+    model: Option<String>,
+    mode: Option<String>,
+    perm: Option<String>,
+    tokens: Option<u64>,
+    default_model: Option<String>,
+    sent: Option<String>,
+}
+
+impl ClaudeTracker {
+    fn ingest(&mut self, line: &str) {
+        let Ok(entry) = serde_json::from_str::<serde_json::Value>(line) else {
+            return;
+        };
+        match entry.get("type").and_then(|t| t.as_str()) {
+            Some("mode") => {
+                if let Some(m) = entry.get("mode").and_then(|m| m.as_str()) {
+                    self.mode = Some(m.to_string());
+                }
+            }
+            Some("permission-mode") => {
+                if let Some(p) = entry.get("permissionMode").and_then(|p| p.as_str()) {
+                    self.perm = Some(p.to_string());
+                }
+            }
+            _ => {}
+        }
+        let msg = entry.get("message");
+        if msg.and_then(|m| m.get("role")).and_then(|r| r.as_str()) != Some("assistant") {
+            return;
+        }
+        if let Some(model) = msg.and_then(|m| m.get("model")).and_then(|m| m.as_str()) {
+            self.model = Some(model.to_string());
+        }
+        if let Some(tok) = msg.and_then(|m| m.get("usage")).and_then(usage_tokens) {
+            self.tokens = Some(tok);
+        }
+    }
+
+    fn tail(&mut self) {
+        let Some(path) = self.path.clone() else { return };
+        let Ok(size) = std::fs::metadata(&path).map(|m| m.len()) else {
+            return;
+        };
+        if size <= self.offset {
+            if size < self.offset {
+                self.offset = 0;
+            }
+            return;
+        }
+        let start = if self.offset == 0 && size > TRANSCRIPT_SEED_CAP {
+            size - TRANSCRIPT_SEED_CAP
+        } else {
+            self.offset
+        };
+        let Ok(mut file) = std::fs::File::open(&path) else {
+            return;
+        };
+        if file.seek(SeekFrom::Start(start)).is_err() {
+            return;
+        }
+        let mut buf = String::new();
+        if file.read_to_string(&mut buf).is_err() {
+            return;
+        }
+        self.offset = size;
+        for line in buf.split('\n') {
+            let line = line.trim();
+            if !line.is_empty() {
+                self.ingest(line);
+            }
+        }
+    }
+
+    fn poll(&mut self, tile_id: &str) -> Option<String> {
+        if self.agent_id.is_none() {
+            let rec = read_binding_rec(tile_id)?;
+            self.agent_id = rec
+                .get("agentSessionId")
+                .and_then(|s| s.as_str())
+                .map(|s| s.to_string());
+            self.cwd = rec.get("cwd").and_then(|s| s.as_str()).map(|s| s.to_string());
+            self.agent_id.as_ref()?;
+        }
+        if self.path.is_none() {
+            let id = self.agent_id.clone()?;
+            self.path = find_transcript(&id, self.cwd.as_deref());
+        }
+        self.tail();
+        if self.default_model.is_none() {
+            self.default_model = default_model();
+        }
+        if self.model.is_none() {
+            self.model = self.default_model.clone();
+        }
+
+        let mut obj = serde_json::Map::new();
+        obj.insert("t".into(), "claude".into());
+        if let Some(m) = &self.model {
+            obj.insert("model".into(), m.clone().into());
+        }
+        if let Some(m) = &self.mode {
+            obj.insert("mode".into(), m.clone().into());
+        }
+        if let Some(p) = &self.perm {
+            obj.insert("permissionMode".into(), p.clone().into());
+        }
+        if let Some(t) = self.tokens {
+            obj.insert("contextTokens".into(), t.into());
+        }
+        if let Some(d) = &self.default_model {
+            obj.insert("defaultModel".into(), d.clone().into());
+        }
+        if obj.len() == 1 {
+            return None;
+        }
+        let json = serde_json::Value::Object(obj).to_string();
+        if self.sent.as_deref() == Some(json.as_str()) {
+            return None;
+        }
+        self.sent = Some(json.clone());
+        Some(json)
+    }
 }
 
 fn record_agent() {
@@ -1009,8 +1191,17 @@ async fn handle_ws(ws: WebSocketStream<TcpStream>, params: Params) {
     session.dirty.store(false, Ordering::Relaxed);
 
     let mut tick = tokio::time::interval(Duration::from_millis(33));
+    let mut claude = ClaudeTracker::default();
+    let mut claude_tick = tokio::time::interval(Duration::from_millis(800));
     loop {
         tokio::select! {
+            _ = claude_tick.tick() => {
+                if let Some(msg) = claude.poll(&params.tile_id) {
+                    if tx.send(Message::Text(msg)).await.is_err() {
+                        break;
+                    }
+                }
+            }
             _ = tick.tick() => {
                 if session.exited.load(Ordering::Relaxed) {
                     let _ = tx.send(Message::Text("{\"t\":\"exit\"}".into())).await;
@@ -1295,6 +1486,39 @@ mod tests {
     #[test]
     fn genuine_invalid_byte_not_held() {
         assert_eq!(utf8_valid_len(&[0xff, 0xfe]), 2);
+    }
+
+    #[test]
+    fn tracker_ingests_model_mode_tokens() {
+        let mut t = super::ClaudeTracker::default();
+        t.ingest(r#"{"type":"mode","mode":"plan"}"#);
+        t.ingest(r#"{"type":"permission-mode","permissionMode":"acceptEdits"}"#);
+        t.ingest(
+            r#"{"message":{"role":"assistant","model":"claude-opus-4-8","usage":{"input_tokens":10,"cache_read_input_tokens":5,"cache_creation_input_tokens":2}}}"#,
+        );
+        assert_eq!(t.mode.as_deref(), Some("plan"));
+        assert_eq!(t.perm.as_deref(), Some("acceptEdits"));
+        assert_eq!(t.model.as_deref(), Some("claude-opus-4-8"));
+        assert_eq!(t.tokens, Some(17));
+    }
+
+    #[test]
+    fn tracker_ignores_non_assistant_usage() {
+        let mut t = super::ClaudeTracker::default();
+        t.ingest(r#"{"message":{"role":"user","usage":{"input_tokens":99}}}"#);
+        assert_eq!(t.model, None);
+        assert_eq!(t.tokens, None);
+    }
+
+    #[test]
+    fn usage_tokens_zero_is_none() {
+        assert_eq!(super::usage_tokens(&serde_json::json!({"input_tokens": 0})), None);
+        assert_eq!(super::usage_tokens(&serde_json::json!({"input_tokens": 3})), Some(3));
+    }
+
+    #[test]
+    fn cwd_slug_replaces_separators() {
+        assert_eq!(super::cwd_slug("D:/workspace/panorama-term"), "D--workspace-panorama-term");
     }
 
     #[test]

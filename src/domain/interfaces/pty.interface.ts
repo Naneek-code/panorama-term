@@ -15,7 +15,19 @@ export interface PtyCwdMessage {
   cwd: string;
 }
 
-export type PtyServerMessage = PtyReadyMessage | PtyExitMessage | PtyCwdMessage;
+export interface ClaudeState {
+  model?: string;
+  mode?: string;
+  permissionMode?: string;
+  contextTokens?: number;
+  defaultModel?: string;
+}
+
+export interface PtyClaudeMessage extends ClaudeState {
+  t: 'claude';
+}
+
+export type PtyServerMessage = PtyReadyMessage | PtyExitMessage | PtyCwdMessage | PtyClaudeMessage;
 
 export interface GridFrame {
   rows: number;

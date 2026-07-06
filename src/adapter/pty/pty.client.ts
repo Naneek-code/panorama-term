@@ -1,4 +1,4 @@
-import type { GridFrame, PtyServerMessage } from '~/domain/interfaces/pty.interface';
+import type { GridFrame, ClaudeState, PtyServerMessage } from '~/domain/interfaces/pty.interface';
 
 const SIDECAR_WS = 'ws://127.0.0.1:9777';
 
@@ -24,6 +24,7 @@ export interface PtyHandlers {
   onReady: (info: PtyReadyInfo) => void;
   onGrid: (frame: GridFrame) => void;
   onCwd: (cwd: string) => void;
+  onClaude: (state: ClaudeState) => void;
 }
 
 const parseGridFrame = (buf: ArrayBuffer): GridFrame | null => {
@@ -64,6 +65,7 @@ export const openPtyConnection = (params: PtyConnectionParams, handlers: PtyHand
       if (msg.t === 'ready') handlers.onReady({ reused: msg.reused, cols: msg.cols, rows: msg.rows, resumeId: msg.resumeId });
       else if (msg.t === 'exit') handlers.onExit();
       else if (msg.t === 'cwd') handlers.onCwd(msg.cwd);
+      else if (msg.t === 'claude') handlers.onClaude(msg);
       return;
     }
     const frame = parseGridFrame(e.data as ArrayBuffer);

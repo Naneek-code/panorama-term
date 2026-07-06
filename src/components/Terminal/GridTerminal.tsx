@@ -1,5 +1,6 @@
 import React from 'react';
 
+import AgentBar from '~/components/Terminal/AgentBar';
 import { termTheme, THEME_EVENT } from '~/usecase/util/theme';
 import { getSetting } from '~/adapter/settings/settings.client';
 import { scheduleConnect } from '~/usecase/util/connectScheduler';
@@ -9,7 +10,7 @@ import { orderSel, selectText, lineSelection, wordSelection } from '~/usecase/ut
 import { readClipboard, writeClipboard, hasClipboardImage } from '~/adapter/clipboard/clipboard.client';
 import { sendPtyKill, sendPtyMouse, sendPtyInput, sendPtyScroll, sendPtyResize, openPtyConnection } from '~/adapter/pty/pty.client';
 
-import type { GridFrame } from '~/domain/interfaces/pty.interface';
+import type { GridFrame, ClaudeState } from '~/domain/interfaces/pty.interface';
 import type { Cell, Selection } from '~/usecase/util/terminalSelection';
 
 import styles from './styles.module.scss';
@@ -65,6 +66,7 @@ const GridTerminal = ({ tileId, cwd, cols, rows, active, visible, k, restartKey,
   const canvasRef = React.useRef<HTMLCanvasElement>(null);
   const wsRef = React.useRef<WebSocket | null>(null);
   const frameRef = React.useRef<GridFrame | null>(null);
+  const claudeRef = React.useRef<ClaudeState | null>(null);
   const dirtyRef = React.useRef(true);
   const blinkRef = React.useRef(true);
   const selRef = React.useRef<Selection | null>(null);
@@ -246,6 +248,9 @@ const GridTerminal = ({ tileId, cwd, cols, rows, active, visible, k, restartKey,
             dirtyRef.current = true;
           },
           onExit: () => {},
+          onClaude: (state) => {
+            claudeRef.current = state;
+          },
           onCwd: (dir) => onCwdRef.current(tileId, dir),
           onReady: (info) => {
             if (!pendingResumeRef.current || !info.resumeId || info.reused) return;
@@ -474,18 +479,39 @@ const GridTerminal = ({ tileId, cwd, cols, rows, active, visible, k, restartKey,
     sendPtyScroll(ws, dir, 3, (cell?.col ?? 0) + 1, (cell?.row ?? 0) + 1);
   };
 
+  const sendData = React.useCallback((data: string) => {
+    const ws = wsRef.current;
+    if (ws) sendPtyInput(ws, data);
+  }, []);
+
+  const getLines = React.useCallback(() => frameRef.current?.lines ?? [], []);
+
+  const getStructured = React.useCallback(() => claudeRef.current, []);
+
+  const focusTerminal = React.useCallback(() => canvasRef.current?.focus({ preventScroll: true }), []);
+
   return (
-    <canvas
-      ref={canvasRef}
-      tabIndex={-1}
-      onWheel={onWheel}
-      onKeyDown={onKeyDown}
-      onPointerUp={onPointerUp}
-      onPointerDown={onPointerDown}
-      onPointerMove={onPointerMove}
-      onPointerCancel={onPointerUp}
-      className={styles.wasm}
-    />
+    <>
+      <canvas
+        ref={canvasRef}
+        tabIndex={-1}
+        onWheel={onWheel}
+        onKeyDown={onKeyDown}
+        onPointerUp={onPointerUp}
+        onPointerDown={onPointerDown}
+        onPointerMove={onPointerMove}
+        onPointerCancel={onPointerUp}
+        className={styles.wasm}
+      />
+      <AgentBar
+        tileId={tileId}
+        active={active}
+        send={sendData}
+        getLines={getLines}
+        getStructured={getStructured}
+        focusTerminal={focusTerminal}
+      />
+    </>
   );
 };
 

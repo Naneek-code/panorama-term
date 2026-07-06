@@ -67,6 +67,42 @@ fn spawn_sidecar() {
     }
 }
 
+#[tauri::command]
+fn write_temp_image(request: tauri::ipc::Request<'_>) -> Result<String, String> {
+    let name = request
+        .headers()
+        .get("x-image-name")
+        .and_then(|v| v.to_str().ok())
+        .unwrap_or("");
+    let safe: String = name
+        .chars()
+        .filter(|c| c.is_ascii_alphanumeric() || matches!(c, '.' | '-' | '_'))
+        .collect();
+    if safe.is_empty() {
+        return Err("invalid file name".into());
+    }
+    let tauri::ipc::InvokeBody::Raw(bytes) = request.body() else {
+        return Err("expected raw image body".into());
+    };
+    let path = std::env::temp_dir().join("panorama-paste").join(safe);
+    if let Some(dir) = path.parent() {
+        std::fs::create_dir_all(dir).map_err(|e| e.to_string())?;
+    }
+    std::fs::write(&path, bytes).map_err(|e| e.to_string())?;
+    Ok(path.to_string_lossy().into_owned())
+}
+
+#[tauri::command]
+fn read_temp_image(path: String) -> Result<tauri::ipc::Response, String> {
+    let base = std::env::temp_dir().join("panorama-paste");
+    let target = PathBuf::from(&path);
+    if !target.starts_with(&base) {
+        return Err("path not allowed".into());
+    }
+    let bytes = std::fs::read(&target).map_err(|e| e.to_string())?;
+    Ok(tauri::ipc::Response::new(bytes))
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     tauri::Builder::default()
@@ -75,6 +111,8 @@ pub fn run() {
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![
+            write_temp_image,
+            read_temp_image,
             store::store_read,
             store::store_write,
             store::store_delete,
