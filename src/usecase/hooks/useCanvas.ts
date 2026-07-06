@@ -141,7 +141,7 @@ export const useCanvas = ({ seed, onPersist }: UseCanvasArgs) => {
   }, []);
 
   const setTileCwd = React.useCallback((id: string, cwd: string) => {
-    const autoTitle = cwd.split(/[\\/]/).filter(Boolean).pop() || cwd;
+    const autoTitle = cwd;
     setTiles((prev) =>
       prev.map((t) =>
         t.id === id && (t.cwd !== cwd || t.autoTitle !== autoTitle)
