@@ -149,14 +149,13 @@ const GridTerminal = ({ tileId, cwd, cols, rows, active, visible, k, restartKey,
       canvas.width = bw;
       canvas.height = bh;
     }
-    const scale = bw / w;
-    const scaleY = bh / h;
-    ctx.setTransform(scale, 0, 0, scaleY, 0, 0);
+    const s = k * dpr;
+    ctx.setTransform(s, 0, 0, s, 0, 0);
     ctx.fillStyle = termTheme.bg;
     ctx.fillRect(0, 0, w, h);
     ctx.textBaseline = 'top';
-    const snap = (v: number) => Math.round(v * scale) / scale;
-    const snapY = (v: number) => Math.round(v * scaleY) / scaleY;
+    const snap = (v: number) => Math.round(v * s) / s;
+    const snapY = snap;
 
     const drawBlock = (cp: number, c: number, r: number) => {
       const x0 = snap(c * cellW);
