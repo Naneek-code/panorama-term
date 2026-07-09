@@ -8,6 +8,8 @@ import TileFrame from '~/components/Canvas/TileFrame';
 import ContextMenu from '~/components/commons/ContextMenu';
 import { useCanvas } from '~/usecase/hooks/useCanvas';
 import { TILE_GAP, CULL_MARGIN, MIN_LIVE_WIDTH } from '~/usecase/util/constants';
+
+const FS_ANIM = 170;
 import { useWorkspace } from '~/usecase/context/WorkspaceContext';
 
 import styles from './styles.module.scss';
@@ -53,6 +55,13 @@ const Canvas = () => {
 
   const [menu, setMenu] = React.useState<Menu | null>(null);
   const [size, setSize] = React.useState({ w: window.innerWidth, h: window.innerHeight });
+  const [fsId, setFsId] = React.useState<string | null>(null);
+  const [fsExit, setFsExit] = React.useState(false);
+  const fsIdRef = React.useRef<string | null>(fsId);
+  fsIdRef.current = fsId;
+  const activeTileRef = React.useRef<string | null>(activeTile);
+  activeTileRef.current = activeTile;
+  const fsTimer = React.useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
   const activated = React.useRef<Set<string>>(new Set());
 
   React.useEffect(() => {
@@ -60,6 +69,63 @@ const Canvas = () => {
     window.addEventListener('resize', onResize);
     return () => window.removeEventListener('resize', onResize);
   }, []);
+
+  const exitFs = React.useCallback(() => {
+    clearTimeout(fsTimer.current);
+    setFsExit(true);
+    fsTimer.current = setTimeout(() => {
+      setFsId(null);
+      setFsExit(false);
+    }, FS_ANIM);
+  }, []);
+
+  const toggleFs = React.useCallback(
+    (id: string) => {
+      if (fsIdRef.current === id) {
+        exitFs();
+        return;
+      }
+      clearTimeout(fsTimer.current);
+      setFsExit(false);
+      setFsId(id);
+    },
+    [exitFs]
+  );
+
+  React.useEffect(() => () => clearTimeout(fsTimer.current), []);
+
+  React.useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if (!(e.ctrlKey || e.metaKey) || !e.shiftKey || e.key.toLowerCase() !== 'f') return;
+      const id = fsIdRef.current ?? activeTileRef.current;
+      if (!id) return;
+      e.preventDefault();
+      e.stopPropagation();
+      toggleFs(id);
+    };
+    window.addEventListener('keydown', onKey, true);
+    return () => window.removeEventListener('keydown', onKey, true);
+  }, [toggleFs]);
+
+  React.useEffect(() => {
+    if (!fsId) return;
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') exitFs();
+    };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, [fsId, exitFs]);
+
+  React.useEffect(() => {
+    if (fsId && !tiles.some((t) => t.id === fsId)) {
+      clearTimeout(fsTimer.current);
+      setFsId(null);
+      setFsExit(false);
+    }
+  }, [tiles, fsId]);
+
+  const vpW = size.w - 16;
+  const vpH = size.h - 54;
 
   const inset = TILE_GAP / 2;
   const isVisible = (t: (typeof tiles)[number]): boolean => {
@@ -124,7 +190,7 @@ const Canvas = () => {
   };
 
   return (
-    <div className={styles.root}>
+    <div className={fsId ? `${styles.root} ${styles.rootFs}` : styles.root}>
       <div
         ref={bgRef}
         className={styles.bg}
@@ -136,9 +202,10 @@ const Canvas = () => {
         onPointerCancel={endPan}
       >
         <canvas ref={gridRef} className={styles.grid} />
-        {frames.map((f) => (
-          <Frame key={f.id} frame={f} view={view} onSnap={snapFrame} onResize={resizeFrame} />
-        ))}
+        {!fsId &&
+          frames.map((f) => (
+            <Frame key={f.id} frame={f} view={view} onSnap={snapFrame} onResize={resizeFrame} />
+          ))}
         {tiles.map((t) => {
           const vis = isVisible(t);
           if (vis && (t.width - TILE_GAP) * view.k >= MIN_LIVE_WIDTH) activated.current.add(t.id);
@@ -154,31 +221,39 @@ const Canvas = () => {
               onResize={resizeTile}
               onActivate={activateTile}
               onFocusTile={focusTile}
+              onToggleFullscreen={toggleFs}
               onCwd={setTileCwd}
               active={t.id === activeTile}
               visible={vis}
               live={live}
+              fullscreen={t.id === fsId}
+              exiting={fsExit}
+              hidden={fsId !== null && t.id !== fsId}
+              vpW={vpW}
+              vpH={vpH}
             />
           );
         })}
-        {frames.map((f) => (
-          <FrameBar
-            key={f.id}
-            frame={f}
-            view={view}
-            tiles={tiles}
-            recede={receded.has(f.id)}
-            onDrag={dragFrame}
-            onRemove={removeFrame}
-            onRename={renameFrame}
-            onRecolor={recolorFrame}
-          />
-        ))}
+        {!fsId &&
+          frames.map((f) => (
+            <FrameBar
+              key={f.id}
+              frame={f}
+              view={view}
+              tiles={tiles}
+              recede={receded.has(f.id)}
+              onDrag={dragFrame}
+              onRemove={removeFrame}
+              onRename={renameFrame}
+              onRecolor={recolorFrame}
+            />
+          ))}
         <div ref={indicatorRef} className={styles.indicator}>
           100%
         </div>
-        <Minimap view={view} tiles={tiles} viewportRef={bgRef} onPan={panTo} />
+        {!fsId && <Minimap view={view} tiles={tiles} viewportRef={bgRef} onPan={panTo} />}
       </div>
+      {fsId && <div className={fsExit ? `${styles.backdrop} ${styles.backdropExit}` : styles.backdrop} />}
       {menu && (
         <ContextMenu
           x={menu.sx}

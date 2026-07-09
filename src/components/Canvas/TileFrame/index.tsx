@@ -1,5 +1,5 @@
 import React from 'react';
-import { X, RotateCw } from 'lucide-react';
+import { X, RotateCw, Maximize2, Minimize2 } from 'lucide-react';
 
 import type { Tile, View } from '~/domain/interfaces/canvas.interface';
 import GridTerminal from '~/components/Terminal/GridTerminal';
@@ -13,10 +13,16 @@ interface TileFrameProps {
   active: boolean;
   visible: boolean;
   live: boolean;
+  hidden: boolean;
+  fullscreen: boolean;
+  exiting: boolean;
+  vpW: number;
+  vpH: number;
   onClose: (id: string) => void;
   onSnap: (id: string) => void;
   onActivate: (id: string) => void;
   onFocusTile: (id: string) => void;
+  onToggleFullscreen: (id: string) => void;
   onMove: (id: string, dx: number, dy: number) => void;
   onResize: (id: string, dir: string, dx: number, dy: number) => void;
   onCwd: (id: string, cwd: string) => void;
@@ -24,18 +30,20 @@ interface TileFrameProps {
 
 const HANDLES = ['n', 's', 'e', 'w', 'nw', 'ne', 'sw', 'se'];
 
+const FS_PAD = 28;
+
 const devicePx = (v: number): number => {
   const dpr = window.devicePixelRatio || 1;
   return Math.round(v * dpr) / dpr;
 };
 
-const TileFrame = ({ tile, view, active, visible, live, onMove, onSnap, onClose, onResize, onActivate, onFocusTile, onCwd }: TileFrameProps) => {
+const TileFrame = ({ tile, view, active, visible, live, hidden, fullscreen, exiting, vpW, vpH, onMove, onSnap, onClose, onResize, onActivate, onFocusTile, onToggleFullscreen, onCwd }: TileFrameProps) => {
   const k = view.k;
   const drag = React.useRef<{ sx: number; sy: number; ox: number; oy: number } | null>(null);
   const resize = React.useRef<{ x: number; y: number; dir: string } | null>(null);
 
   const startDrag = (e: React.PointerEvent) => {
-    if (e.button !== 0) return;
+    if (e.button !== 0 || fullscreen) return;
     e.stopPropagation();
     onActivate(tile.id);
     (e.target as Element).setPointerCapture(e.pointerId);
@@ -75,24 +83,27 @@ const TileFrame = ({ tile, view, active, visible, live, onMove, onSnap, onClose,
   const restartTile = () => setRestartKey((n) => n + 1);
   const closeTile = () => onClose(tile.id);
   const focusTile = () => onFocusTile(tile.id);
+  const toggleFullscreen = () => onToggleFullscreen(tile.id);
   const label = tile.userTitle || tile.autoTitle || `${tile.type} · ${tile.id}`;
 
   const inset = TILE_GAP / 2;
-  const bodyW = tile.width - TILE_GAP;
-  const bodyH = tile.height - TILE_GAP;
-  const sx = (tile.x + inset) * k + view.x;
-  const sy = (tile.y + inset) * k + view.y;
-  const z = active ? 2 : 1;
-  const scaled = { width: bodyW, height: bodyH, transform: `scale(${k})`, transformOrigin: 'top left' as const };
+  const ek = fullscreen ? 1 : k;
+  const bodyW = fullscreen ? vpW - FS_PAD * 2 : tile.width - TILE_GAP;
+  const bodyH = fullscreen ? vpH - FS_PAD * 2 : tile.height - TILE_GAP;
+  const sx = fullscreen ? FS_PAD : (tile.x + inset) * k + view.x;
+  const sy = fullscreen ? FS_PAD : (tile.y + inset) * k + view.y;
+  const z = fullscreen ? 50 : active ? 2 : 1;
+  const box = fullscreen
+    ? { width: bodyW, height: bodyH }
+    : { width: bodyW, height: bodyH, transform: `scale(${k})`, transformOrigin: 'top left' as const };
   const term = tile.type === 'term' && live;
+  const anim = fullscreen ? (exiting ? styles.fsExit : styles.fsEnter) : null;
+  const cls = [styles.tile, active && !fullscreen && styles.active, anim].filter(Boolean).join(' ');
+  const gone = { display: hidden ? 'none' : undefined };
 
   return (
     <>
-      <div
-        data-tile={tile.id}
-        className={active ? `${styles.tile} ${styles.active}` : styles.tile}
-        style={{ top: sy, left: sx, zIndex: z, ...scaled }}
-      >
+      <div data-tile={tile.id} className={cls} style={{ top: sy, left: sx, zIndex: z, ...box, ...gone }}>
         <div
           className={styles.header}
           onPointerUp={endDrag}
@@ -106,6 +117,9 @@ const TileFrame = ({ tile, view, active, visible, live, onMove, onSnap, onClose,
             <button className={styles.action} onClick={restartTile} aria-label="Restart terminal">
               <RotateCw size={13} strokeWidth={2} />
             </button>
+            <button className={styles.action} onClick={toggleFullscreen} aria-label="Toggle fullscreen">
+              {fullscreen ? <Minimize2 size={13} strokeWidth={2} /> : <Maximize2 size={13} strokeWidth={2} />}
+            </button>
             <button className={`${styles.action} ${styles.close}`} onClick={closeTile} aria-label="Close tile">
               <X size={14} strokeWidth={2} />
             </button>
@@ -116,41 +130,44 @@ const TileFrame = ({ tile, view, active, visible, live, onMove, onSnap, onClose,
       {term && (
         <div
           data-tile={tile.id}
-          className={styles.termLayer}
+          className={anim ? `${styles.termLayer} ${anim}` : styles.termLayer}
           style={{
-            top: devicePx(sy + (TILE_HEADER + 4) * k),
-            left: devicePx(sx + 4 * k),
-            width: devicePx((bodyW - 8) * k),
-            height: devicePx((bodyH - TILE_HEADER - 5) * k),
-            zIndex: z
+            top: devicePx(sy + (TILE_HEADER + 4) * ek),
+            left: devicePx(sx + 4 * ek),
+            width: devicePx((bodyW - 8) * ek),
+            height: devicePx((bodyH - TILE_HEADER - 5) * ek),
+            zIndex: z,
+            ...gone
           }}
         >
           <GridTerminal
-            k={k}
+            k={ek}
             cwd={tile.cwd}
             onCwd={onCwd}
             restartKey={restartKey}
             active={active}
-            visible={visible}
+            visible={visible && !hidden}
             tileId={tile.id}
             cols={Math.max(20, Math.floor((bodyW - 8) / 7.23))}
             rows={Math.max(2, Math.floor((bodyH - TILE_HEADER - 4) / 15))}
           />
         </div>
       )}
-      <div data-tile={tile.id} className={styles.handles} style={{ top: sy, left: sx, zIndex: z, ...scaled }}>
-        {HANDLES.map((dir) => (
-          <div
-            key={dir}
-            data-dir={dir}
-            className={styles.handle}
-            onPointerUp={endResize}
-            onPointerMove={onResizeMove}
-            onPointerCancel={endResize}
-            onPointerDown={startResize(dir)}
-          />
-        ))}
-      </div>
+      {!fullscreen && (
+        <div data-tile={tile.id} className={styles.handles} style={{ top: sy, left: sx, zIndex: z, ...box, ...gone }}>
+          {HANDLES.map((dir) => (
+            <div
+              key={dir}
+              data-dir={dir}
+              className={styles.handle}
+              onPointerUp={endResize}
+              onPointerMove={onResizeMove}
+              onPointerCancel={endResize}
+              onPointerDown={startResize(dir)}
+            />
+          ))}
+        </div>
+      )}
     </>
   );
 };

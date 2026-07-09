@@ -77,6 +77,8 @@ const GridTerminal = ({ tileId, cwd, cols, rows, active, visible, k, restartKey,
   const lastFwdRef = React.useRef({ row: -1, col: -1 });
   const pendingResumeRef = React.useRef(false);
   const prevKRef = React.useRef(k);
+  const maskRef = React.useRef(false);
+  const prevDimsRef = React.useRef({ cols, rows });
   const settleRef = React.useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
   const activeRef = React.useRef(active);
   const visibleRef = React.useRef(visible);
@@ -107,6 +109,25 @@ const GridTerminal = ({ tileId, cwd, cols, rows, active, visible, k, restartKey,
     }
     const nCols = frame.cols;
     const nRows = frame.rows;
+    if (maskRef.current) {
+      if (nCols === colsRef.current && nRows === rowsRef.current) {
+        maskRef.current = false;
+      } else {
+        const dpr = window.devicePixelRatio || 1;
+        const rect = canvas.getBoundingClientRect();
+        if (rect.width === 0 || rect.height === 0) return;
+        const bw = Math.round(rect.width * dpr);
+        const bh = Math.round(rect.height * dpr);
+        if (canvas.width !== bw || canvas.height !== bh) {
+          canvas.width = bw;
+          canvas.height = bh;
+        }
+        ctx.setTransform(1, 0, 0, 1, 0, 0);
+        ctx.fillStyle = termTheme.bg;
+        ctx.fillRect(0, 0, bw, bh);
+        return;
+      }
+    }
     const w = nCols * cellW;
     const h = nRows * CELL_H;
     const k = kRef.current;
@@ -286,6 +307,12 @@ const GridTerminal = ({ tileId, cwd, cols, rows, active, visible, k, restartKey,
   }, [tileId, cwd, draw]);
 
   React.useEffect(() => {
+    const prev = prevDimsRef.current;
+    prevDimsRef.current = { cols, rows };
+    if (Math.abs(cols - prev.cols) + Math.abs(rows - prev.rows) > 12) {
+      maskRef.current = true;
+      dirtyRef.current = true;
+    }
     const ws = wsRef.current;
     if (ws && ws.readyState === WebSocket.OPEN) sendPtyResize(ws, cols, rows);
   }, [cols, rows]);
