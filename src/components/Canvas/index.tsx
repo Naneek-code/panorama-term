@@ -7,12 +7,13 @@ import Minimap from '~/components/Canvas/Minimap';
 import TileFrame from '~/components/Canvas/TileFrame';
 import ContextMenu from '~/components/commons/ContextMenu';
 import { useCanvas } from '~/usecase/hooks/useCanvas';
-import { TILE_GAP, CULL_MARGIN, MIN_LIVE_WIDTH } from '~/usecase/util/constants';
-
-const FS_ANIM = 170;
 import { useWorkspace } from '~/usecase/context/WorkspaceContext';
+import { TILE_GAP, CULL_MARGIN, MIN_LIVE_WIDTH } from '~/usecase/util/constants';
+import { isCapturing, matchCommand, type CommandId } from '~/usecase/util/keybindings';
 
 import styles from './styles.module.scss';
+
+const FS_ANIM = 170;
 
 interface Menu {
   sx: number;
@@ -41,6 +42,7 @@ const Canvas = () => {
     closeTile,
     snapFrame,
     activeTile,
+    resetZoom,
     resizeTile,
     removeFrame,
     renameFrame,
@@ -95,17 +97,40 @@ const Canvas = () => {
   React.useEffect(() => () => clearTimeout(fsTimer.current), []);
 
   React.useEffect(() => {
+    const run = (cmd: CommandId): boolean => {
+      if (cmd === 'tile.fullscreen') {
+        const id = fsIdRef.current ?? activeTileRef.current;
+        if (!id) return false;
+        toggleFs(id);
+        return true;
+      }
+      if (cmd === 'tile.new') {
+        addTile();
+        return true;
+      }
+      if (cmd === 'tile.close') {
+        const id = activeTileRef.current;
+        if (!id) return false;
+        closeTile(id);
+        return true;
+      }
+      if (cmd === 'view.resetZoom') {
+        resetZoom();
+        return true;
+      }
+      return false;
+    };
     const onKey = (e: KeyboardEvent) => {
-      if (!(e.ctrlKey || e.metaKey) || !e.shiftKey || e.key.toLowerCase() !== 'f') return;
-      const id = fsIdRef.current ?? activeTileRef.current;
-      if (!id) return;
+      if (isCapturing()) return;
+      const cmd = matchCommand(e);
+      if (!cmd) return;
+      if (!run(cmd)) return;
       e.preventDefault();
       e.stopPropagation();
-      toggleFs(id);
     };
     window.addEventListener('keydown', onKey, true);
     return () => window.removeEventListener('keydown', onKey, true);
-  }, [toggleFs]);
+  }, [toggleFs, addTile, closeTile, resetZoom]);
 
   React.useEffect(() => {
     if (!fsId) return;

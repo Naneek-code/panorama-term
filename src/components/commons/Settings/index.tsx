@@ -1,15 +1,31 @@
 import React from 'react';
-import { X, Palette, SquareTerminal } from 'lucide-react';
+import { X, Palette, Keyboard, RotateCcw, SquareTerminal } from 'lucide-react';
 
 import { getSetting, setSetting } from '~/adapter/settings/settings.client';
 import { ZOOM_MAX, MAX_ZOOM_KEY } from '~/usecase/util/constants';
 import { getThemePref, setThemePref, type ThemePref } from '~/usecase/util/theme';
 import { listTerminalTargets, TERMINAL_TARGET_KEY } from '~/usecase/util/terminalTarget';
+import {
+  KEYBINDINGS,
+  getBinding,
+  setBinding,
+  formatCombo,
+  resetBinding,
+  setCapturing,
+  comboFromEvent,
+  type CommandId
+} from '~/usecase/util/keybindings';
 
 import styles from './styles.module.scss';
 
 interface SettingsProps {
   onClose: () => void;
+}
+
+interface ShortcutRowProps {
+  id: CommandId;
+  label: string;
+  defaultCombo: string;
 }
 
 interface RadioOptionProps {
@@ -33,6 +49,62 @@ const RadioOption = ({ label, description, selected, onSelect }: RadioOptionProp
   </button>
 );
 
+const ShortcutRow = ({ id, label, defaultCombo }: ShortcutRowProps) => {
+  const [combo, setCombo] = React.useState(() => getBinding(id));
+  const [listening, setListening] = React.useState(false);
+
+  React.useEffect(() => {
+    if (!listening) return;
+    setCapturing(true);
+    const onKey = (e: KeyboardEvent) => {
+      e.preventDefault();
+      e.stopPropagation();
+      if (e.key === 'Escape') {
+        setListening(false);
+        return;
+      }
+      const next = comboFromEvent(e);
+      if (!next) return;
+      setCombo(next);
+      void setBinding(id, next);
+      setListening(false);
+    };
+    window.addEventListener('keydown', onKey, true);
+    return () => {
+      window.removeEventListener('keydown', onKey, true);
+      setCapturing(false);
+    };
+  }, [listening, id]);
+
+  const startListening = () => setListening(true);
+
+  const reset = () => {
+    void resetBinding(id);
+    setCombo(defaultCombo);
+  };
+
+  return (
+    <div className={styles.shortcut}>
+      <span className={styles.shortcutLabel}>{label}</span>
+      <div className={styles.shortcutKeys}>
+        {combo !== defaultCombo && (
+          <button className={styles.shortcutReset} onClick={reset} aria-label="Reset to default">
+            <RotateCcw size={13} strokeWidth={2} />
+          </button>
+        )}
+        <button
+          onClick={startListening}
+          className={`${styles.shortcutCombo} ${listening ? styles.listening : ''}`}
+        >
+          {listening ? 'Press keys...' : formatCombo(combo)}
+        </button>
+      </div>
+    </div>
+  );
+};
+
+const GROUPS = [...new Set(KEYBINDINGS.map((k) => k.group))];
+
 const THEMES: { id: ThemePref; label: string; description: string }[] = [
   { id: 'system', label: 'System', description: 'Follow the operating system setting.' },
   { id: 'dark', label: 'Dark', description: 'Dark surfaces across the app.' },
@@ -41,7 +113,7 @@ const THEMES: { id: ThemePref; label: string; description: string }[] = [
 
 const Settings = ({ onClose }: SettingsProps) => {
   const options = React.useMemo(listTerminalTargets, []);
-  const [section, setSection] = React.useState<'terminal' | 'appearance'>('terminal');
+  const [section, setSection] = React.useState<'terminal' | 'appearance' | 'shortcuts'>('appearance');
   const [target, setTarget] = React.useState(() => getSetting(TERMINAL_TARGET_KEY, 'auto'));
   const [theme, setTheme] = React.useState<ThemePref>(getThemePref);
   const [maxZoom, setMaxZoom] = React.useState(() => getSetting(MAX_ZOOM_KEY, 1));
@@ -78,6 +150,14 @@ const Settings = ({ onClose }: SettingsProps) => {
           <nav className={styles.nav}>
             <button
               type="button"
+              onClick={() => setSection('appearance')}
+              className={`${styles.navItem} ${section === 'appearance' ? styles.navActive : ''}`}
+            >
+              <Palette size={15} strokeWidth={1.75} />
+              <span>Appearance</span>
+            </button>
+            <button
+              type="button"
               onClick={() => setSection('terminal')}
               className={`${styles.navItem} ${section === 'terminal' ? styles.navActive : ''}`}
             >
@@ -86,11 +166,11 @@ const Settings = ({ onClose }: SettingsProps) => {
             </button>
             <button
               type="button"
-              onClick={() => setSection('appearance')}
-              className={`${styles.navItem} ${section === 'appearance' ? styles.navActive : ''}`}
+              onClick={() => setSection('shortcuts')}
+              className={`${styles.navItem} ${section === 'shortcuts' ? styles.navActive : ''}`}
             >
-              <Palette size={15} strokeWidth={1.75} />
-              <span>Appearance</span>
+              <Keyboard size={15} strokeWidth={1.75} />
+              <span>Shortcuts</span>
             </button>
           </nav>
         </aside>
@@ -98,7 +178,7 @@ const Settings = ({ onClose }: SettingsProps) => {
           <button className={styles.close} onClick={onClose} aria-label="Close settings">
             <X size={15} strokeWidth={1.75} />
           </button>
-          {section === 'terminal' ? (
+          {section === 'terminal' && (
             <div className={styles.pane}>
               <div className={styles.paneHead}>
                 <h2 className={styles.title}>Terminal</h2>
@@ -137,7 +217,8 @@ const Settings = ({ onClose }: SettingsProps) => {
                 <p className={styles.hint}>Above 100% terminal text may look blurry.</p>
               </div>
             </div>
-          ) : (
+          )}
+          {section === 'appearance' && (
             <div className={styles.pane}>
               <div className={styles.paneHead}>
                 <h2 className={styles.title}>Appearance</h2>
@@ -157,6 +238,24 @@ const Settings = ({ onClose }: SettingsProps) => {
                   ))}
                 </div>
               </div>
+            </div>
+          )}
+          {section === 'shortcuts' && (
+            <div className={styles.pane}>
+              <div className={styles.paneHead}>
+                <h2 className={styles.title}>Shortcuts</h2>
+                <p className={styles.subtitle}>Click a shortcut and press the keys to rebind it.</p>
+              </div>
+              {GROUPS.map((group) => (
+                <div key={group} className={styles.group}>
+                  <p className={styles.groupLabel}>{group}</p>
+                  <div className={styles.shortcuts}>
+                    {KEYBINDINGS.filter((k) => k.group === group).map((k) => (
+                      <ShortcutRow key={k.id} id={k.id} label={k.label} defaultCombo={k.defaultCombo} />
+                    ))}
+                  </div>
+                </div>
+              ))}
             </div>
           )}
         </section>
