@@ -1,5 +1,5 @@
 import React from 'react';
-import { X, RotateCw, Maximize2, Minimize2 } from 'lucide-react';
+import { X, RotateCw, Maximize, Minimize } from 'lucide-react';
 
 import type { Tile, View } from '~/domain/interfaces/canvas.interface';
 import GridTerminal from '~/components/Terminal/GridTerminal';
@@ -114,15 +114,17 @@ const TileFrame = ({ tile, view, active, visible, live, hidden, fullscreen, exit
         >
           <span className={styles.title}>{label}</span>
           <div className={styles.actions}>
+            <button className={styles.action} onClick={toggleFullscreen} aria-label="Toggle fullscreen">
+              {fullscreen ? <Minimize size={13} strokeWidth={2} /> : <Maximize size={13} strokeWidth={2} />}
+            </button>
             <button className={styles.action} onClick={restartTile} aria-label="Restart terminal">
               <RotateCw size={13} strokeWidth={2} />
             </button>
-            <button className={styles.action} onClick={toggleFullscreen} aria-label="Toggle fullscreen">
-              {fullscreen ? <Minimize2 size={13} strokeWidth={2} /> : <Maximize2 size={13} strokeWidth={2} />}
-            </button>
-            <button className={`${styles.action} ${styles.close}`} onClick={closeTile} aria-label="Close tile">
-              <X size={14} strokeWidth={2} />
-            </button>
+            {!fullscreen && (
+              <button className={`${styles.action} ${styles.close}`} onClick={closeTile} aria-label="Close tile">
+                <X size={14} strokeWidth={2} />
+              </button>
+            )}
           </div>
         </div>
         <div className={styles.body}>{!term && <div className={styles.placeholder}>{tile.type !== 'term' ? label : ''}</div>}</div>
