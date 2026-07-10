@@ -1,12 +1,15 @@
 import React from 'react';
 import type { Editor } from '@tiptap/react';
-import { X, Copy, RotateCw, Maximize, Minimize } from 'lucide-react';
+import { X, Copy, Focus, Pencil, Trash2, Maximize, Minimize, RotateCw, CopyPlus, FolderOpen, ClipboardCopy } from 'lucide-react';
 
 import type { Tile, View } from '~/domain/interfaces/canvas.interface';
+import type { ContextMenuEntry } from '~/components/commons/ContextMenu';
 import NoteTile from '~/components/Canvas/NoteTile';
+import { noteTextColor } from '~/usecase/util/note';
+import ContextMenu from '~/components/commons/ContextMenu';
 import GridTerminal from '~/components/Terminal/GridTerminal';
 import { TILE_GAP, TILE_HEADER } from '~/usecase/util/constants';
-import { noteTextColor } from '~/usecase/util/note';
+import { getBinding, formatCombo } from '~/usecase/util/keybindings';
 
 import styles from './styles.module.scss';
 
@@ -34,6 +37,10 @@ interface TileFrameProps {
   onNoteEditor: (id: string, editor: Editor | null) => void;
   onNoteTitle: (id: string, title: string) => void;
   onCopyNote: (id: string) => void;
+  onRename: (id: string, title: string) => void;
+  onCopyPath: (id: string) => void;
+  onReveal: (id: string) => void;
+  onDuplicate: (id: string) => void;
 }
 
 const HANDLES = ['n', 's', 'e', 'w', 'nw', 'ne', 'sw', 'se'];
@@ -45,7 +52,7 @@ const devicePx = (v: number): number => {
   return Math.round(v * dpr) / dpr;
 };
 
-const TileFrame = ({ tile, view, active, alert, visible, live, hidden, fullscreen, exiting, vpW, vpH, onMove, onSnap, onClose, onResize, onActivate, onFocusTile, onToggleFullscreen, onCwd, onNoteChange, onNoteEditor, onNoteTitle, onCopyNote }: TileFrameProps) => {
+const TileFrame = ({ tile, view, active, alert, visible, live, hidden, fullscreen, exiting, vpW, vpH, onMove, onSnap, onClose, onResize, onActivate, onFocusTile, onToggleFullscreen, onCwd, onNoteChange, onNoteEditor, onNoteTitle, onCopyNote, onRename, onCopyPath, onReveal, onDuplicate }: TileFrameProps) => {
   const k = view.k;
   const drag = React.useRef<{ sx: number; sy: number; ox: number; oy: number } | null>(null);
   const resize = React.useRef<{ x: number; y: number; dir: string } | null>(null);
@@ -100,6 +107,68 @@ const TileFrame = ({ tile, view, active, alert, visible, live, hidden, fullscree
   const changeTitle = (e: React.ChangeEvent<HTMLInputElement>) => onNoteTitle(tile.id, e.target.value);
   const stopDrag = (e: React.PointerEvent) => e.stopPropagation();
 
+  const [menu, setMenu] = React.useState<{ x: number; y: number } | null>(null);
+  const [renaming, setRenaming] = React.useState(false);
+  const [draft, setDraft] = React.useState('');
+  const renameRef = React.useRef<HTMLInputElement>(null);
+
+  const closeMenu = () => setMenu(null);
+  const openMenu = (e: React.MouseEvent) => {
+    if (note || fullscreen) return;
+    e.preventDefault();
+    e.stopPropagation();
+    onActivate(tile.id);
+    setMenu({ x: e.clientX, y: e.clientY });
+  };
+
+  const startRename = () => {
+    setDraft(tile.userTitle || tile.autoTitle || '');
+    setRenaming(true);
+  };
+  const commitRename = () => {
+    if (!renaming) return;
+    setRenaming(false);
+    const next = draft.trim();
+    if (next !== (tile.userTitle || '')) onRename(tile.id, next);
+  };
+  const onRenameKey = (e: React.KeyboardEvent) => {
+    if (e.key === 'Enter') commitRename();
+    if (e.key === 'Escape') setRenaming(false);
+  };
+
+  React.useEffect(() => {
+    if (renaming) renameRef.current?.select();
+  }, [renaming]);
+
+  const duplicate = () => onDuplicate(tile.id);
+  const copyPath = () => onCopyPath(tile.id);
+  const reveal = () => onReveal(tile.id);
+
+  const menuItems: ContextMenuEntry[] = [
+    { label: 'Rename', icon: <Pencil size={15} strokeWidth={1.75} />, onSelect: startRename },
+    { label: 'Duplicate', icon: <CopyPlus size={15} strokeWidth={1.75} />, onSelect: duplicate },
+    'separator',
+    { label: 'Reveal in explorer', icon: <FolderOpen size={15} strokeWidth={1.75} />, onSelect: reveal, disabled: !tile.cwd },
+    { label: 'Copy path', icon: <ClipboardCopy size={15} strokeWidth={1.75} />, onSelect: copyPath, disabled: !tile.cwd },
+    'separator',
+    { label: 'Restart terminal', icon: <RotateCw size={15} strokeWidth={1.75} />, onSelect: restartTile },
+    { label: 'Focus', icon: <Focus size={15} strokeWidth={1.75} />, onSelect: focusTile },
+    {
+      label: fullscreen ? 'Exit fullscreen' : 'Fullscreen',
+      icon: fullscreen ? <Minimize size={15} strokeWidth={1.75} /> : <Maximize size={15} strokeWidth={1.75} />,
+      shortcut: formatCombo(getBinding('tile.fullscreen')),
+      onSelect: toggleFullscreen
+    },
+    'separator',
+    {
+      label: 'Close',
+      icon: <Trash2 size={15} strokeWidth={1.75} />,
+      shortcut: formatCombo(getBinding('tile.close')),
+      danger: true,
+      onSelect: closeTile
+    }
+  ];
+
   const inset = TILE_GAP / 2;
   const ek = fullscreen ? 1 : k;
   const bodyW = fullscreen ? vpW - FS_PAD * 2 : tile.width - TILE_GAP;
@@ -125,6 +194,7 @@ const TileFrame = ({ tile, view, active, alert, visible, live, hidden, fullscree
           onPointerMove={onDrag}
           onPointerCancel={endDrag}
           onDoubleClick={focusTile}
+          onContextMenu={openMenu}
         >
           {note ? (
             <input
@@ -133,6 +203,19 @@ const TileFrame = ({ tile, view, active, alert, visible, live, hidden, fullscree
               placeholder="Note"
               onChange={changeTitle}
               onPointerDown={stopDrag}
+            />
+          ) : renaming ? (
+            <input
+              ref={renameRef}
+              className={styles.renameInput}
+              value={draft}
+              placeholder={tile.autoTitle || 'Terminal'}
+              onBlur={commitRename}
+              onChange={(e) => setDraft(e.target.value)}
+              onKeyDown={onRenameKey}
+              onPointerDown={stopDrag}
+              onDoubleClick={(e) => e.stopPropagation()}
+              autoFocus
             />
           ) : (
             <span className={styles.title}>
@@ -210,6 +293,7 @@ const TileFrame = ({ tile, view, active, alert, visible, live, hidden, fullscree
           ))}
         </div>
       )}
+      {menu && <ContextMenu x={menu.x} y={menu.y} items={menuItems} onClose={closeMenu} />}
     </>
   );
 };

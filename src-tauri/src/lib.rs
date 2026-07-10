@@ -169,6 +169,23 @@ fn focus_main(app: tauri::AppHandle) -> Result<(), String> {
     win.set_focus().map_err(|e| e.to_string())
 }
 
+#[tauri::command]
+fn reveal_path(path: String) -> Result<(), String> {
+    let spawn = |cmd: &str, args: &[&str]| {
+        std::process::Command::new(cmd)
+            .args(args)
+            .spawn()
+            .map(|_| ())
+            .map_err(|e| e.to_string())
+    };
+    #[cfg(target_os = "windows")]
+    return spawn("cmd", &["/C", "start", "", &path]);
+    #[cfg(target_os = "macos")]
+    return spawn("open", &[&path]);
+    #[cfg(all(unix, not(target_os = "macos")))]
+    return spawn("xdg-open", &[&path]);
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     tauri::Builder::default()
@@ -187,6 +204,7 @@ pub fn run() {
             read_temp_image,
             notif_layout,
             focus_main,
+            reveal_path,
             store::store_read,
             store::store_write,
             store::store_delete,

@@ -2,6 +2,7 @@ import React from 'react';
 import type { Editor } from '@tiptap/react';
 import { StickyNote, SquareDashed, SquareTerminal } from 'lucide-react';
 
+import { revealPath } from '~/adapter/shell/shell.client';
 import { writeClipboard } from '~/adapter/clipboard/clipboard.client';
 import Frame from '~/components/Canvas/Frame';
 import FrameBar from '~/components/Canvas/FrameBar';
@@ -40,6 +41,7 @@ const Canvas = () => {
     patchTile,
     addFrame,
     gridRef,
+    duplicateTile,
     focusTile,
     onWheel,
     moveTile,
@@ -229,6 +231,17 @@ const Canvas = () => {
   const setNoteContent = (id: string, content: string) => patchTile(id, { content });
   const setNoteColor = (id: string, color: string) => patchTile(id, { color });
   const setNoteTitle = (id: string, title: string) => patchTile(id, { userTitle: title });
+  const setTileTitle = (id: string, title: string) => patchTile(id, { userTitle: title || undefined });
+
+  const copyTilePath = (id: string) => {
+    const cwd = tiles.find((t) => t.id === id)?.cwd;
+    if (cwd) writeClipboard(cwd);
+  };
+
+  const revealTilePath = (id: string) => {
+    const cwd = tiles.find((t) => t.id === id)?.cwd;
+    if (cwd) revealPath(cwd);
+  };
 
   const copyNote = (id: string) => {
     const editor = noteEditors[id];
@@ -324,6 +337,10 @@ const Canvas = () => {
               onNoteEditor={registerEditor}
               onNoteTitle={setNoteTitle}
               onCopyNote={copyNote}
+              onRename={setTileTitle}
+              onCopyPath={copyTilePath}
+              onReveal={revealTilePath}
+              onDuplicate={duplicateTile}
               active={t.id === activeTile}
               alert={alerts.has(t.id)}
               visible={vis}

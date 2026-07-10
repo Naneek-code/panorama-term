@@ -152,6 +152,24 @@
   }
 }
 
+.renameInput {
+  flex: 1;
+  min-width: 0;
+  padding: 1px 4px;
+  margin: -1px 0;
+  color: var(--text-1);
+  font-size: 12px;
+  font-family: 'Geist Mono', ui-monospace, monospace;
+  background: var(--surface-1);
+  border: 1px solid var(--accent);
+  border-radius: 4px;
+  outline: none;
+
+  &::placeholder {
+    color: var(--text-dim);
+  }
+}
+
 .termLayer {
   position: absolute;
   overflow: hidden;

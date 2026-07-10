@@ -202,6 +202,23 @@ export const useCanvas = ({ seed, onPersist }: UseCanvasArgs) => {
     void killPtySession(id);
   }, []);
 
+  const duplicateTile = React.useCallback((id: string) => {
+    setTiles((prev) => {
+      const src = prev.find((t) => t.id === id);
+      if (!src) return prev;
+      const copy: Tile = {
+        ...src,
+        id: createId(),
+        x: src.x + 24,
+        y: src.y + 24,
+        zIndex: prev.reduce((m, t) => Math.max(m, t.zIndex), 0) + 1,
+        ptySessionId: undefined,
+        content: undefined
+      };
+      return [...prev, copy];
+    });
+  }, []);
+
   const setTileCwd = React.useCallback((id: string, cwd: string) => {
     const autoTitle = cwd;
     setTiles((prev) =>
@@ -479,6 +496,7 @@ export const useCanvas = ({ seed, onPersist }: UseCanvasArgs) => {
     addTile,
     patchTile,
     addFrame,
+    duplicateTile,
     moveTile,
     snapTile,
     dragFrame,
