@@ -93,6 +93,7 @@ const AgentBar = ({ tileId, active, send, getLines, getStructured, focusTerminal
   const submitSeqRef = React.useRef(0);
   const seenRef = React.useRef(false);
   const lastSeenRef = React.useRef(0);
+  const barOpenRef = React.useRef<boolean | null>(null);
   historyRef.current = history;
   draftRef.current = draft;
 
@@ -214,9 +215,15 @@ const AgentBar = ({ tileId, active, send, getLines, getStructured, focusTerminal
   }, [draft, claudeActive, tileId]);
 
   React.useEffect(() => {
-    if (!active) return;
+    if (!active) {
+      barOpenRef.current = null;
+      return;
+    }
+    const barOpen = claudeActive && !hidden;
+    if (barOpenRef.current === barOpen) return;
+    barOpenRef.current = barOpen;
     const el = editorRef.current;
-    if (claudeActive && !hidden && el) {
+    if (barOpen && el) {
       el.focus();
       placeCaretAtEnd(el);
       return;
