@@ -214,6 +214,17 @@ const AgentBar = ({ tileId, active, send, getLines, getStructured, focusTerminal
   }, [draft, claudeActive, tileId]);
 
   React.useEffect(() => {
+    if (!active) return;
+    const el = editorRef.current;
+    if (claudeActive && !hidden && el) {
+      el.focus();
+      placeCaretAtEnd(el);
+      return;
+    }
+    focusTerminal();
+  }, [active, claudeActive, hidden, focusTerminal]);
+
+  React.useEffect(() => {
     if (!claudeActive || !active) return;
     const onKey = (e: KeyboardEvent) => {
       if (!e.ctrlKey || e.shiftKey || e.metaKey || e.altKey) return;
