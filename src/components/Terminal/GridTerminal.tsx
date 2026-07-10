@@ -102,8 +102,6 @@ const GridTerminal = ({ tileId, cwd, cols, rows, active, visible, k, restartKey,
       if (canvas.width !== 1) {
         canvas.width = 1;
         canvas.height = 1;
-        canvas.style.width = '0px';
-        canvas.style.height = '0px';
       }
       return;
     }
