@@ -34,7 +34,10 @@ const NotificationOverlay = () => {
 
   React.useEffect(() => {
     const shown = listen<NotifyPayload>('notif:show', (e) => {
-      setToasts((prev) => [...prev, e.payload].slice(-MAX_TOASTS));
+      setToasts((prev) => {
+        const kept = prev.filter((t) => t.tileId !== e.payload.tileId || t.kind !== e.payload.kind);
+        return [...kept, e.payload].slice(-MAX_TOASTS);
+      });
       playSound(e.payload.kind);
     });
     const dismissed = listen<{ tileId: string }>('notif:dismiss', (e) => {

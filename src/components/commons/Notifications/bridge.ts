@@ -23,6 +23,7 @@ interface BridgeArgs {
   tiles: Tile[];
   activeTile: string | null;
   onOpen: (tileId: string) => void;
+  onAlert: (tileId: string) => void;
 }
 
 let seq = 0;
@@ -38,12 +39,15 @@ const tileTitle = (tile: Tile | undefined): string => {
   return 'Terminal';
 };
 
-export const useNotifyBridge = ({ tiles, activeTile, onOpen }: BridgeArgs): void => {
+export const useNotifyBridge = ({ tiles, activeTile, onOpen, onAlert }: BridgeArgs): void => {
   const tilesRef = React.useRef(tiles);
   tilesRef.current = tiles;
 
   const onOpenRef = React.useRef(onOpen);
   onOpenRef.current = onOpen;
+
+  const onAlertRef = React.useRef(onAlert);
+  onAlertRef.current = onAlert;
 
   React.useEffect(() => {
     const onNotify = (e: Event) => {
@@ -56,6 +60,7 @@ export const useNotifyBridge = ({ tiles, activeTile, onOpen }: BridgeArgs): void
         title: tileTitle(tile)
       };
       void emit('notif:show', payload);
+      onAlertRef.current(detail.tileId);
     };
     window.addEventListener(NOTIFY_EVENT, onNotify);
     return () => window.removeEventListener(NOTIFY_EVENT, onNotify);

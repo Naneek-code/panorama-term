@@ -14,6 +14,7 @@ interface TileFrameProps {
   tile: Tile;
   view: View;
   active: boolean;
+  alert: boolean;
   visible: boolean;
   live: boolean;
   hidden: boolean;
@@ -44,7 +45,7 @@ const devicePx = (v: number): number => {
   return Math.round(v * dpr) / dpr;
 };
 
-const TileFrame = ({ tile, view, active, visible, live, hidden, fullscreen, exiting, vpW, vpH, onMove, onSnap, onClose, onResize, onActivate, onFocusTile, onToggleFullscreen, onCwd, onNoteChange, onNoteEditor, onNoteTitle, onCopyNote }: TileFrameProps) => {
+const TileFrame = ({ tile, view, active, alert, visible, live, hidden, fullscreen, exiting, vpW, vpH, onMove, onSnap, onClose, onResize, onActivate, onFocusTile, onToggleFullscreen, onCwd, onNoteChange, onNoteEditor, onNoteTitle, onCopyNote }: TileFrameProps) => {
   const k = view.k;
   const drag = React.useRef<{ sx: number; sy: number; ox: number; oy: number } | null>(null);
   const resize = React.useRef<{ x: number; y: number; dir: string } | null>(null);
@@ -134,7 +135,10 @@ const TileFrame = ({ tile, view, active, visible, live, hidden, fullscreen, exit
               onPointerDown={stopDrag}
             />
           ) : (
-            <span className={styles.title}>{label}</span>
+            <span className={styles.title}>
+              {alert && <span className={styles.alertDot} />}
+              {label}
+            </span>
           )}
           <div className={styles.actions}>
             {note && (

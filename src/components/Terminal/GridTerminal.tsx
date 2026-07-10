@@ -276,9 +276,17 @@ const GridTerminal = ({ tileId, cwd, cols, rows, active, visible, k, restartKey,
             const next = state.status;
             if (next && next !== prev) {
               statusRef.current = next;
+              const rect = canvasRef.current?.getBoundingClientRect();
+              const inView =
+                !!rect &&
+                rect.width > 0 &&
+                rect.right > 0 &&
+                rect.bottom > 0 &&
+                rect.top < window.innerHeight &&
+                rect.left < window.innerWidth;
               const onScreen = !document.hidden && document.hasFocus();
-              const watching = activeRef.current && visibleRef.current && onScreen;
-              if (prev !== undefined && !watching) {
+              const watching = activeRef.current && inView && onScreen;
+              if (!watching) {
                 if (prev === 'busy' && next === 'idle') notifyClaude(tileId, 'finished');
                 else if (next === 'waiting') notifyClaude(tileId, 'attention');
               }

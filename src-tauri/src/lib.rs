@@ -129,10 +129,11 @@ fn notif_layout(app: tauri::AppHandle, height: f64) -> Result<(), String> {
     if height <= 0.0 {
         return win.hide().map_err(|e| e.to_string());
     }
-    let monitor = win
-        .primary_monitor()
-        .map_err(|e| e.to_string())?
-        .ok_or("no primary monitor")?;
+    let monitor = app
+        .get_webview_window("main")
+        .and_then(|main| main.current_monitor().ok().flatten())
+        .or_else(|| win.primary_monitor().ok().flatten())
+        .ok_or("no monitor")?;
     let scale = monitor.scale_factor();
     let area = monitor.work_area();
     let size = area.size.to_logical::<f64>(scale);

@@ -62,6 +62,7 @@ const Canvas = () => {
   } = useCanvas({ seed: activeState, onPersist: saveActiveState });
 
   const [menu, setMenu] = React.useState<Menu | null>(null);
+  const [alerts, setAlerts] = React.useState<Set<string>>(() => new Set());
   const [noteEditors, setNoteEditors] = React.useState<Record<string, Editor>>({});
   const [size, setSize] = React.useState({ w: window.innerWidth, h: window.innerHeight });
   const [fsId, setFsId] = React.useState<string | null>(null);
@@ -250,15 +251,40 @@ const Canvas = () => {
     if (menu) addFrame(menu.wx, menu.wy);
   };
 
-  const openNotified = React.useCallback(
+  const addAlert = React.useCallback((id: string) => {
+    setAlerts((prev) => (prev.has(id) ? prev : new Set(prev).add(id)));
+  }, []);
+
+  const clearAlert = React.useCallback((id: string) => {
+    setAlerts((prev) => {
+      if (!prev.has(id)) return prev;
+      const next = new Set(prev);
+      next.delete(id);
+      return next;
+    });
+  }, []);
+
+  React.useEffect(() => {
+    if (activeTile) clearAlert(activeTile);
+  }, [activeTile, clearAlert]);
+
+  const activateAndClear = React.useCallback(
     (id: string) => {
+      clearAlert(id);
       activateTile(id);
-      focusTile(id, true);
     },
-    [activateTile, focusTile]
+    [clearAlert, activateTile]
   );
 
-  useNotifyBridge({ tiles, activeTile, onOpen: openNotified });
+  const openNotified = React.useCallback(
+    (id: string) => {
+      activateAndClear(id);
+      focusTile(id, true);
+    },
+    [activateAndClear, focusTile]
+  );
+
+  useNotifyBridge({ tiles, activeTile, onOpen: openNotified, onAlert: addAlert });
 
   return (
     <div className={fsId ? `${styles.root} ${styles.rootFs}` : styles.root}>
@@ -290,7 +316,7 @@ const Canvas = () => {
               onSnap={snapTile}
               onClose={closeTile}
               onResize={resizeTile}
-              onActivate={activateTile}
+              onActivate={activateAndClear}
               onFocusTile={focusTile}
               onToggleFullscreen={toggleFs}
               onCwd={setTileCwd}
@@ -299,6 +325,7 @@ const Canvas = () => {
               onNoteTitle={setNoteTitle}
               onCopyNote={copyNote}
               active={t.id === activeTile}
+              alert={alerts.has(t.id)}
               visible={vis}
               live={live}
               fullscreen={t.id === fsId}
