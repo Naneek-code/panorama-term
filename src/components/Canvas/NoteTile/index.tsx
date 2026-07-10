@@ -6,7 +6,7 @@ import { TaskList, TaskItem } from '@tiptap/extension-list';
 import { useEditor, EditorContent, type Editor } from '@tiptap/react';
 
 import type { Tile } from '~/domain/interfaces/canvas.interface';
-import { noteTextColor } from '~/usecase/util/note';
+import { noteTextColor, NOTE_DEFAULT_COLOR } from '~/usecase/util/note';
 
 import styles from './styles.module.scss';
 import './content.scss';
@@ -67,7 +67,10 @@ const NoteTile = ({ tile, active, onChange, onActivate, onEditor }: NoteTileProp
       className={`pano-note ${styles.note}`}
       onWheel={stopWheel}
       onPointerDown={activate}
-      style={{ ['--note-text' as string]: noteTextColor(tile.color || '#fef8c4') }}
+      style={{
+        ['--note-body' as string]: tile.color || NOTE_DEFAULT_COLOR,
+        ['--note-text' as string]: noteTextColor(tile.color || NOTE_DEFAULT_COLOR)
+      }}
     >
       <EditorContent editor={editor} className={editorCls} />
     </div>
