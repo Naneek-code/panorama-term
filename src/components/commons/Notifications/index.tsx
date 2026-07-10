@@ -1,7 +1,7 @@
 import React from 'react';
 import { invoke } from '@tauri-apps/api/core';
 import { emit, listen } from '@tauri-apps/api/event';
-import { X, CircleCheck, CircleAlert } from 'lucide-react';
+import { X, CircleCheck, MessageCircleQuestionMark } from 'lucide-react';
 
 import type { NotifyKind, NotifyPayload } from '~/components/commons/Notifications/bridge';
 
@@ -55,8 +55,12 @@ const NotificationOverlay = () => {
     <div ref={stackRef} className={styles.stack}>
       {toasts.map((toast) => (
         <div key={toast.id} className={styles.toast} onClick={() => open(toast)}>
-          <div className={toast.kind === 'finished' ? styles.iconOk : styles.iconAlert}>
-            {toast.kind === 'finished' ? <CircleCheck size={20} /> : <CircleAlert size={20} />}
+          <div className={toast.kind === 'finished' ? styles.iconOk : styles.iconAsk}>
+            {toast.kind === 'finished' ? (
+              <CircleCheck size={20} />
+            ) : (
+              <MessageCircleQuestionMark size={20} />
+            )}
           </div>
           <div className={styles.body}>
             <div className={styles.title}>{toast.title}</div>
