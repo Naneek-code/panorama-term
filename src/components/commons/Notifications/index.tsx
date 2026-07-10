@@ -28,6 +28,9 @@ const NotificationOverlay = () => {
   const [expanded, setExpanded] = React.useState(false);
   const [itemH, setItemH] = React.useState(0);
   const frontRef = React.useRef<HTMLDivElement>(null);
+  const hoverTimer = React.useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
+
+  React.useEffect(() => () => clearTimeout(hoverTimer.current), []);
 
   React.useEffect(() => {
     const shown = listen<NotifyPayload>('notif:show', (e) => {
@@ -68,8 +71,14 @@ const NotificationOverlay = () => {
     setToasts((prev) => prev.filter((t) => t.id !== id));
   };
 
-  const expand = () => setExpanded(true);
-  const collapse = () => setExpanded(false);
+  const expand = () => {
+    clearTimeout(hoverTimer.current);
+    setExpanded(true);
+  };
+
+  const collapse = () => {
+    hoverTimer.current = setTimeout(() => setExpanded(false), 140);
+  };
 
   const styleFor = (i: number): React.CSSProperties => {
     const n = toasts.length;

@@ -138,15 +138,26 @@ fn notif_layout(app: tauri::AppHandle, height: f64) -> Result<(), String> {
     let size = area.size.to_logical::<f64>(scale);
     let pos = area.position.to_logical::<f64>(scale);
     let h = height.clamp(1.0, size.height);
-    win.set_size(LogicalSize::new(NOTIF_WIDTH, h))
-        .map_err(|e| e.to_string())?;
-    win.set_position(LogicalPosition::new(
-        pos.x + size.width - NOTIF_WIDTH,
-        pos.y + size.height - h,
-    ))
-    .map_err(|e| e.to_string())?;
-    win.show().map_err(|e| e.to_string())?;
-    win.set_always_on_top(true).map_err(|e| e.to_string())
+    let current = win
+        .inner_size()
+        .map_err(|e| e.to_string())?
+        .to_logical::<f64>(scale);
+    let target_size = LogicalSize::new(NOTIF_WIDTH, h);
+    let target_pos = LogicalPosition::new(pos.x + size.width - NOTIF_WIDTH, pos.y + size.height - h);
+
+    if h > current.height {
+        win.set_position(target_pos).map_err(|e| e.to_string())?;
+        win.set_size(target_size).map_err(|e| e.to_string())?;
+    } else {
+        win.set_size(target_size).map_err(|e| e.to_string())?;
+        win.set_position(target_pos).map_err(|e| e.to_string())?;
+    }
+
+    if !win.is_visible().map_err(|e| e.to_string())? {
+        win.show().map_err(|e| e.to_string())?;
+        win.set_always_on_top(true).map_err(|e| e.to_string())?;
+    }
+    Ok(())
 }
 
 #[tauri::command]
