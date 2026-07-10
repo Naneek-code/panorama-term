@@ -13,6 +13,7 @@ import './content.scss';
 
 interface NoteTileProps {
   tile: Tile;
+  active: boolean;
   onChange: (id: string, content: string) => void;
   onActivate: (id: string) => void;
   onEditor: (id: string, editor: Editor | null) => void;
@@ -26,7 +27,7 @@ const EXTENSIONS = [
   Placeholder.configure({ placeholder: 'Click to edit...' })
 ];
 
-const NoteTile = ({ tile, onChange, onActivate, onEditor }: NoteTileProps) => {
+const NoteTile = ({ tile, active, onChange, onActivate, onEditor }: NoteTileProps) => {
   const save = React.useRef<ReturnType<typeof setTimeout> | null>(null);
 
   const editor = useEditor({
@@ -51,7 +52,12 @@ const NoteTile = ({ tile, onChange, onActivate, onEditor }: NoteTileProps) => {
   );
 
   const activate = () => onActivate(tile.id);
-  const stopWheel = (e: React.WheelEvent) => e.stopPropagation();
+
+  const stopWheel = (e: React.WheelEvent) => {
+    if (active) e.stopPropagation();
+  };
+
+  const editorCls = active ? `${styles.editor} ${styles.scrollable}` : styles.editor;
 
   return (
     <div
@@ -60,7 +66,7 @@ const NoteTile = ({ tile, onChange, onActivate, onEditor }: NoteTileProps) => {
       onPointerDown={activate}
       style={{ ['--note-text' as string]: noteTextColor(tile.color || '#fef8c4') }}
     >
-      <EditorContent editor={editor} className={styles.editor} />
+      <EditorContent editor={editor} className={editorCls} />
     </div>
   );
 };

@@ -159,7 +159,7 @@ const TileFrame = ({ tile, view, active, visible, live, hidden, fullscreen, exit
         </div>
         <div className={styles.body}>
           {note ? (
-            <NoteTile tile={tile} onChange={onNoteChange} onActivate={onActivate} onEditor={onNoteEditor} />
+            <NoteTile tile={tile} active={active} onChange={onNoteChange} onActivate={onActivate} onEditor={onNoteEditor} />
           ) : (
             !term && <div className={styles.placeholder}>{tile.type !== 'term' ? label : ''}</div>
           )}
