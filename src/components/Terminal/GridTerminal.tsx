@@ -278,7 +278,8 @@ const GridTerminal = ({ tileId, cwd, cols, rows, active, visible, k, restartKey,
             const next = state.status;
             if (next && next !== prev) {
               statusRef.current = next;
-              const watching = activeRef.current && document.hasFocus();
+              const onScreen = !document.hidden && document.hasFocus();
+              const watching = activeRef.current && visibleRef.current && onScreen;
               if (prev !== undefined && !watching) {
                 if (prev === 'busy' && next === 'idle') notifyClaude(tileId, 'finished');
                 else if (next === 'waiting') notifyClaude(tileId, 'attention');
