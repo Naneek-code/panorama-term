@@ -7,12 +7,13 @@ import { scheduleConnect } from '~/usecase/util/connectScheduler';
 import { TERMINAL_TARGET_KEY } from '~/usecase/util/terminalTarget';
 import { keyToBytes } from '~/usecase/util/terminalKeys';
 import { notifyClaude } from '~/components/commons/Notifications/bridge';
-import { orderSel, selectText, lineSelection, wordSelection } from '~/usecase/util/terminalSelection';
+import { openUrl } from '~/adapter/shell/shell.client';
+import { urlSpanAt, orderSel, selectText, lineSelection, wordSelection } from '~/usecase/util/terminalSelection';
 import { readClipboard, writeClipboard, hasClipboardImage } from '~/adapter/clipboard/clipboard.client';
 import { sendPtyKill, sendPtyMouse, sendPtyInput, sendPtyScroll, sendPtyResize, openPtyConnection } from '~/adapter/pty/pty.client';
 
 import type { GridFrame, ClaudeState } from '~/domain/interfaces/pty.interface';
-import type { Cell, Selection } from '~/usecase/util/terminalSelection';
+import type { Cell, Selection, UrlSpan } from '~/usecase/util/terminalSelection';
 
 import styles from './styles.module.scss';
 
@@ -72,6 +73,7 @@ const GridTerminal = ({ tileId, cwd, cols, rows, active, visible, k, restartKey,
   const dirtyRef = React.useRef(true);
   const blinkRef = React.useRef(true);
   const selRef = React.useRef<Selection | null>(null);
+  const hoverRef = React.useRef<UrlSpan | null>(null);
   const selectingRef = React.useRef(false);
   const clickRef = React.useRef({ t: 0, row: -1, col: -1, count: 0 });
   const mouseFwdRef = React.useRef(false);
@@ -232,6 +234,12 @@ const GridTerminal = ({ tileId, cwd, cols, rows, active, visible, k, restartKey,
       }
     }
 
+    const hov = hoverRef.current;
+    if (hov && hov.row >= 0 && hov.row < nRows) {
+      ctx.fillStyle = termTheme.fg;
+      ctx.fillRect(hov.c0 * cellW, snapY(hov.row * CELL_H + CELL_H - 1), (hov.c1 - hov.c0 + 1) * cellW, 1);
+    }
+
     if (activeRef.current && blinkRef.current && !frame.cursorHidden) {
       ctx.fillStyle = termTheme.cursor;
       ctx.fillRect(frame.cursorCol * cellW, frame.cursorRow * CELL_H, cellW, CELL_H);
@@ -244,6 +252,18 @@ const GridTerminal = ({ tileId, cwd, cols, rows, active, visible, k, restartKey,
     };
     window.addEventListener(THEME_EVENT, onTheme);
     return () => window.removeEventListener(THEME_EVENT, onTheme);
+  }, []);
+
+  React.useEffect(() => {
+    const onKeyUp = (e: KeyboardEvent) => {
+      if ((e.key === 'Control' || e.key === 'Meta') && hoverRef.current) {
+        hoverRef.current = null;
+        dirtyRef.current = true;
+        if (canvasRef.current) canvasRef.current.style.cursor = '';
+      }
+    };
+    window.addEventListener('keyup', onKeyUp);
+    return () => window.removeEventListener('keyup', onKeyUp);
   }, []);
 
   React.useEffect(() => {
@@ -414,6 +434,15 @@ const GridTerminal = ({ tileId, cwd, cols, rows, active, visible, k, restartKey,
 
     const frame = frameRef.current;
     const ws = wsRef.current;
+    if (e.button === 0 && (e.ctrlKey || e.metaKey) && frame) {
+      const span = urlSpanAt(frame.lines[cell.row] ?? '', cell.row, cell.col);
+      if (span) {
+        e.preventDefault();
+        e.stopPropagation();
+        openUrl(span.url);
+        return;
+      }
+    }
     if (ws && frame && frame.mouseMode > 0 && !e.shiftKey) {
       e.stopPropagation();
       canvasRef.current?.setPointerCapture(e.pointerId);
@@ -462,7 +491,21 @@ const GridTerminal = ({ tileId, cwd, cols, rows, active, visible, k, restartKey,
       sendPtyMouse(ws, 2, mouseBtnRef.current, cell.col + 1, cell.row + 1, modBits(e));
       return;
     }
-    if (!selectingRef.current || !selRef.current) return;
+    if (!selectingRef.current || !selRef.current) {
+      const canvas = canvasRef.current;
+      if (canvas) {
+        const frame = frameRef.current;
+        const cell = (e.ctrlKey || e.metaKey) && frame ? cellFromEvent(e) : null;
+        const span = cell && frame ? urlSpanAt(frame.lines[cell.row] ?? '', cell.row, cell.col) : null;
+        canvas.style.cursor = span ? 'pointer' : '';
+        const prev = hoverRef.current;
+        if (span?.url !== prev?.url || span?.row !== prev?.row || span?.c0 !== prev?.c0) {
+          hoverRef.current = span;
+          dirtyRef.current = true;
+        }
+      }
+      return;
+    }
     const cell = cellFromEvent(e);
     if (!cell) return;
     selRef.current = { a: selRef.current.a, b: cell };
@@ -515,6 +558,13 @@ const GridTerminal = ({ tileId, cwd, cols, rows, active, visible, k, restartKey,
     sendPtyInput(ws, bytes);
   };
 
+  const onPointerLeave = () => {
+    if (!hoverRef.current) return;
+    hoverRef.current = null;
+    dirtyRef.current = true;
+    if (canvasRef.current) canvasRef.current.style.cursor = '';
+  };
+
   const onWheel = (e: React.WheelEvent) => {
     if (!activeRef.current) return;
     const ws = wsRef.current;
@@ -548,6 +598,7 @@ const GridTerminal = ({ tileId, cwd, cols, rows, active, visible, k, restartKey,
         onPointerUp={onPointerUp}
         onPointerDown={onPointerDown}
         onPointerMove={onPointerMove}
+        onPointerLeave={onPointerLeave}
         onPointerCancel={onPointerUp}
         className={styles.wasm}
       />

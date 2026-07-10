@@ -170,6 +170,23 @@ fn focus_main(app: tauri::AppHandle) -> Result<(), String> {
 }
 
 #[tauri::command]
+fn open_url(url: String) -> Result<(), String> {
+    let spawn = |cmd: &str, args: &[&str]| {
+        std::process::Command::new(cmd)
+            .args(args)
+            .spawn()
+            .map(|_| ())
+            .map_err(|e| e.to_string())
+    };
+    #[cfg(target_os = "windows")]
+    return spawn("rundll32", &["url.dll,FileProtocolHandler", &url]);
+    #[cfg(target_os = "macos")]
+    return spawn("open", &[&url]);
+    #[cfg(all(unix, not(target_os = "macos")))]
+    return spawn("xdg-open", &[&url]);
+}
+
+#[tauri::command]
 fn reveal_path(path: String) -> Result<(), String> {
     let spawn = |cmd: &str, args: &[&str]| {
         std::process::Command::new(cmd)
@@ -205,6 +222,7 @@ pub fn run() {
             notif_layout,
             focus_main,
             reveal_path,
+            open_url,
             store::store_read,
             store::store_write,
             store::store_delete,

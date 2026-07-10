@@ -24,6 +24,29 @@ export const wordSelection = (line: string, row: number, col: number): Selection
   return { a: { row, col: c0 }, b: { row, col: c1 } };
 };
 
+export interface UrlSpan {
+  url: string;
+  row: number;
+  c0: number;
+  c1: number;
+}
+
+export const urlSpanAt = (line: string, row: number, col: number): UrlSpan | null => {
+  const chars = Array.from(line);
+  const isUrlChar = (c: string | undefined): boolean => c !== undefined && c !== ' ' && c !== '\t';
+  if (!isUrlChar(chars[col])) return null;
+  let s = col;
+  let e = col;
+  while (s > 0 && isUrlChar(chars[s - 1])) s--;
+  while (e < chars.length - 1 && isUrlChar(chars[e + 1])) e++;
+  const token = chars.slice(s, e + 1).join('');
+  const m = token.match(/https?:\/\/\S+/i);
+  if (!m || m.index === undefined) return null;
+  const url = m[0].replace(/[.,;:!?)\]}'"]+$/, '');
+  const c0 = s + m.index;
+  return { url, row, c0, c1: c0 + Array.from(url).length - 1 };
+};
+
 export const lineSelection = (row: number, cols: number): Selection => ({
   a: { row, col: 0 },
   b: { row, col: cols - 1 }
