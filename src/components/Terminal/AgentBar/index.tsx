@@ -96,8 +96,10 @@ const AgentBar = ({ tileId, active, send, getLines, getStructured, focusTerminal
   const seenRef = React.useRef(false);
   const lastSeenRef = React.useRef(0);
   const barOpenRef = React.useRef<boolean | null>(null);
+  const activeRef = React.useRef(active);
   historyRef.current = history;
   draftRef.current = draft;
+  activeRef.current = active;
 
   const isEmpty = isDraftEmpty(draft);
   const hidden = questionMode || manualHide;
@@ -115,7 +117,7 @@ const AgentBar = ({ tileId, active, send, getLines, getStructured, focusTerminal
     if (!el) return;
     renderEditor(el, next);
     if (focus) {
-      el.focus();
+      el.focus({ preventScroll: true });
       placeCaretAtEnd(el);
     }
     draftRef.current = next;
@@ -192,7 +194,7 @@ const AgentBar = ({ tileId, active, send, getLines, getStructured, focusTerminal
       setSuggest(null);
       histIdxRef.current = null;
       histDraftRef.current = cloneDraft(EMPTY_DRAFT);
-      renderAndFocus(restored, restored.text.length > 0 || restored.images.length > 0);
+      renderAndFocus(restored, activeRef.current && (restored.text.length > 0 || restored.images.length > 0));
     } else {
       setStatus({});
       setScraped(null);
@@ -226,7 +228,7 @@ const AgentBar = ({ tileId, active, send, getLines, getStructured, focusTerminal
     barOpenRef.current = barOpen;
     const el = editorRef.current;
     if (barOpen && el) {
-      el.focus();
+      el.focus({ preventScroll: true });
       placeCaretAtEnd(el);
       return;
     }
@@ -255,7 +257,7 @@ const AgentBar = ({ tileId, active, send, getLines, getStructured, focusTerminal
       e.stopPropagation();
       const el = editorRef.current;
       if (el) {
-        el.focus();
+        el.focus({ preventScroll: true });
         placeCaretAtEnd(el);
       }
     };
@@ -361,7 +363,7 @@ const AgentBar = ({ tileId, active, send, getLines, getStructured, focusTerminal
         syncFromEditor();
         const el = editorRef.current;
         if (el) {
-          el.focus();
+          el.focus({ preventScroll: true });
           placeCaretAtEnd(el);
         }
       }
@@ -401,7 +403,7 @@ const AgentBar = ({ tileId, active, send, getLines, getStructured, focusTerminal
 
     const el = editorRef.current;
     if (!el) return;
-    el.focus();
+    el.focus({ preventScroll: true });
     if (saved && el.contains(saved.startContainer)) {
       const sel = window.getSelection();
       sel?.removeAllRanges();
@@ -622,7 +624,7 @@ const AgentBar = ({ tileId, active, send, getLines, getStructured, focusTerminal
     if (target.closest('[data-imgpath]') || target.closest(`.${styles.actions}`) || target.closest(`.${styles.editor}`)) return;
     const el = editorRef.current;
     if (el) {
-      el.focus();
+      el.focus({ preventScroll: true });
       placeCaretAtEnd(el);
     }
   };

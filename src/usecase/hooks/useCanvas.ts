@@ -129,6 +129,17 @@ export const useCanvas = ({ seed, onPersist }: UseCanvasArgs) => {
     return () => ro.disconnect();
   }, []);
 
+  React.useEffect(() => {
+    const bg = bgRef.current;
+    if (!bg) return;
+    const onScroll = () => {
+      bg.scrollLeft = 0;
+      bg.scrollTop = 0;
+    };
+    bg.addEventListener('scroll', onScroll);
+    return () => bg.removeEventListener('scroll', onScroll);
+  }, []);
+
   React.useEffect(
     () => () => {
       cancelAnimationFrame(snapRaf.current);
