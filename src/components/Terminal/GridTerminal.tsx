@@ -123,8 +123,7 @@ const GridTerminal = ({ tileId, cwd, cols, rows, active, visible, k, restartKey,
           canvas.height = bh;
         }
         ctx.setTransform(1, 0, 0, 1, 0, 0);
-        ctx.fillStyle = termTheme.bg;
-        ctx.fillRect(0, 0, bw, bh);
+        ctx.clearRect(0, 0, bw, bh);
         return;
       }
     }
@@ -151,8 +150,7 @@ const GridTerminal = ({ tileId, cwd, cols, rows, active, visible, k, restartKey,
     }
     const s = k * dpr;
     ctx.setTransform(s, 0, 0, s, 0, 0);
-    ctx.fillStyle = termTheme.bg;
-    ctx.fillRect(0, 0, w, h);
+    ctx.clearRect(0, 0, w, h);
     ctx.textBaseline = 'top';
     const snap = (v: number) => Math.round(v * s) / s;
     const snapY = snap;
