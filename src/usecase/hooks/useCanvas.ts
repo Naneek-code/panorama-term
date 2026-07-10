@@ -112,6 +112,11 @@ export const useCanvas = ({ seed, onPersist }: UseCanvasArgs) => {
       const w = bg.clientWidth;
       const h = bg.clientHeight;
       if (!w || !h) return;
+      if (focusRaf.current) {
+        prevW = w;
+        prevH = h;
+        return;
+      }
       const v = viewRef.current;
       const next = { ...v, x: v.x + (w - prevW) / 2, y: v.y + (h - prevH) / 2 };
       viewRef.current = next;
@@ -424,7 +429,7 @@ export const useCanvas = ({ seed, onPersist }: UseCanvasArgs) => {
     cancelAnimationFrame(focusRaf.current);
     cancelAnimationFrame(snapRaf.current);
     clearTimeout(snapTimer.current);
-    if (!bg.clientWidth || !bg.clientHeight) {
+    if (document.hidden || !bg.clientWidth || !bg.clientHeight) {
       focusRaf.current = requestAnimationFrame(() => run(id, zoomToMax));
       return;
     }
@@ -444,7 +449,7 @@ export const useCanvas = ({ seed, onPersist }: UseCanvasArgs) => {
       const next = { k, x: bg.clientWidth / 2 - wx * k, y: bg.clientHeight / 2 - wy * k };
       viewRef.current = next;
       setView(next);
-      if (p < 1) focusRaf.current = requestAnimationFrame(step);
+      focusRaf.current = p < 1 ? requestAnimationFrame(step) : 0;
     };
     focusRaf.current = requestAnimationFrame(step);
   }, []);
