@@ -8,8 +8,7 @@ use tauri::{LogicalPosition, LogicalSize, Manager, WebviewUrl, WebviewWindowBuil
 mod store;
 
 const SIDECAR_PORT: u16 = 9777;
-const NOTIF_WIDTH: f64 = 440.0;
-const NOTIF_MARGIN: f64 = 16.0;
+const NOTIF_WIDTH: f64 = 448.0;
 
 fn sidecar_alive() -> bool {
     let addr = format!("127.0.0.1:{SIDECAR_PORT}").parse().unwrap();
@@ -138,12 +137,12 @@ fn notif_layout(app: tauri::AppHandle, height: f64) -> Result<(), String> {
     let area = monitor.work_area();
     let size = area.size.to_logical::<f64>(scale);
     let pos = area.position.to_logical::<f64>(scale);
-    let h = height.clamp(1.0, size.height - NOTIF_MARGIN * 2.0);
+    let h = height.clamp(1.0, size.height);
     win.set_size(LogicalSize::new(NOTIF_WIDTH, h))
         .map_err(|e| e.to_string())?;
     win.set_position(LogicalPosition::new(
-        pos.x + size.width - NOTIF_WIDTH - NOTIF_MARGIN,
-        pos.y + size.height - h - NOTIF_MARGIN,
+        pos.x + size.width - NOTIF_WIDTH,
+        pos.y + size.height - h,
     ))
     .map_err(|e| e.to_string())?;
     win.show().map_err(|e| e.to_string())?;
