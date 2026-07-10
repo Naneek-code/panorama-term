@@ -1,5 +1,5 @@
 import React from 'react';
-import { Bot, SquareTerminal } from 'lucide-react';
+import { Bot, Brain, SquareTerminal } from 'lucide-react';
 
 import type { PromptSuggestion, AgentSuggestHandle } from '../types';
 
@@ -98,12 +98,12 @@ const Suggest = React.forwardRef<AgentSuggestHandle, SuggestProps>(
               onMouseDown={pick(item)}
               className={i === selected ? `${styles.item} ${styles.selected}` : styles.item}
             >
-              {item.icon === 'model' ? (
-                <Bot size={13} className={styles.icon} />
-              ) : (
-                <SquareTerminal size={13} className={styles.icon} />
-              )}
-              <span className={styles.display}>{item.display}</span>
+              {item.icon === 'model' && <Bot size={13} className={styles.icon} />}
+              {item.icon === 'effort' && <Brain size={13} className={styles.icon} style={{ color: item.color }} />}
+              {item.icon === 'cmd' && <SquareTerminal size={13} className={styles.icon} />}
+              <span className={styles.display} style={item.color ? { color: item.color } : undefined}>
+                {item.display}
+              </span>
               {item.subtext && <span className={styles.sub}>{item.subtext}</span>}
             </div>
           ))

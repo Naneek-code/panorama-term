@@ -18,14 +18,25 @@ export const BPM_END = '\x1b[201~';
 export const draftKey = (tileId: string): string => `agent:draft:${tileId}`;
 
 export const MODEL_QUICK_SWITCHES = [
+  { id: 'claude-fable-5', title: 'Fable 5' },
   { id: 'claude-sonnet-5', title: 'Sonnet 5' },
   { id: 'claude-opus-4-6', title: 'Opus 4.6' },
   { id: 'claude-opus-4-7', title: 'Opus 4.7' },
   { id: 'claude-opus-4-8', title: 'Opus 4.8' },
+  { id: 'claude-fable-5[1m]', title: 'Fable 5 · 1M' },
   { id: 'claude-sonnet-5[1m]', title: 'Sonnet 5 · 1M' },
   { id: 'claude-opus-4-6[1m]', title: 'Opus 4.6 · 1M' },
   { id: 'claude-opus-4-7[1m]', title: 'Opus 4.7 · 1M' },
   { id: 'claude-opus-4-8[1m]', title: 'Opus 4.8 · 1M' }
+] as const;
+
+export const EFFORT_LEVELS = [
+  { id: 'low', desc: 'Fastest, shallow reasoning', color: '#4ade80' },
+  { id: 'medium', desc: 'Balanced', color: '#a3e635' },
+  { id: 'high', desc: 'Default', color: '#38bdf8' },
+  { id: 'xhigh', desc: 'Deeper reasoning', color: '#fb923c' },
+  { id: 'max', desc: 'Smartest, slowest', color: '#f87171' },
+  { id: 'ultracode', desc: 'xhigh + workflows', color: '#a855f7' }
 ] as const;
 
 export const CLAUDE_MODELS: AgentModel[] = [
@@ -51,7 +62,7 @@ export const CLAUDE_SLASH_COMMANDS: AgentSlashCommand[] = [
   { name: '/rename', desc: 'Rename current session', takesArg: true },
   { name: '/exit', desc: 'Exit the CLI' },
   { name: '/model', desc: 'Select/change AI model' },
-  { name: '/effort', desc: 'Set effort level (low/medium/high/max)', takesArg: true },
+  { name: '/effort', desc: 'Set reasoning effort level', takesArg: true },
   { name: '/config', desc: 'Open Settings interface' },
   { name: '/fast', desc: 'Toggle fast mode' },
   { name: '/theme', desc: 'Change color theme' },

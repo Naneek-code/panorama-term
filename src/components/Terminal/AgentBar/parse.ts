@@ -50,7 +50,7 @@ export const looksLikeClaude = (text: string): boolean => {
   ) {
     return true;
   }
-  if (/\[[^\]\n]*\b(opus|sonnet|haiku)\b[^\]\n]*\]/i.test(text)) return true;
+  if (/\[[^\]\n]*\b(opus|sonnet|haiku|fable)\b[^\]\n]*\]/i.test(text)) return true;
   if (/\bClaude Code v\d/i.test(text)) return true;
   if (/press ctrl-?c again/i.test(text)) return true;
   return false;
@@ -97,7 +97,7 @@ const scrapeModel = (rows: string[]): { model: string; contextInfo?: string } | 
   for (let i = 0; i < rows.length - 1; i++) {
     if (!/Claude Code v\d/i.test(rows[i] ?? '')) continue;
     const banner = rows[i + 1] ?? '';
-    const bm = banner.match(/\b(Opus|Sonnet|Haiku)\s+[\d.]+/i);
+    const bm = banner.match(/\b(Opus|Sonnet|Haiku|Fable)\s+[\d.]+/i);
     if (bm) {
       const ctx = banner.match(/\(([^)]*context[^)]*)\)/i)?.[1];
       return ctx ? { model: bm[0].trim(), contextInfo: ctx.trim() } : { model: bm[0].trim() };
@@ -154,6 +154,8 @@ export const detectSuggestTrigger = (text: string, caret: number): SuggestTrigge
   const before = text.slice(0, caret);
   const modelMatch = before.match(/^\/model\s+(\S*)$/);
   if (modelMatch) return { kind: 'model', query: modelMatch[1] ?? '' };
+  const effortMatch = before.match(/^\/effort\s+(\S*)$/);
+  if (effortMatch) return { kind: 'effort', query: effortMatch[1] ?? '' };
   if (/^\/\S*$/.test(before)) return { kind: 'slash', query: before.slice(1) };
   return null;
 };

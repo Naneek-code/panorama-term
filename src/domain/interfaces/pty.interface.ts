@@ -20,6 +20,7 @@ export interface ClaudeState {
   mode?: string;
   permissionMode?: string;
   contextTokens?: number;
+  effort?: string;
   defaultModel?: string;
   status?: string;
 }

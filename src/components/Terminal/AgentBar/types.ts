@@ -10,7 +10,7 @@ export interface AgentBarProps {
   focusTerminal: () => void;
 }
 
-export type SuggestTrigger = { kind: 'slash' | 'model'; query: string } | null;
+export type SuggestTrigger = { kind: 'slash' | 'model' | 'effort'; query: string } | null;
 
 export type ContentPart = { type: 'text'; content: string } | { type: 'image'; path: string };
 
@@ -37,9 +37,10 @@ export interface FooterRead {
 export interface PromptSuggestion {
   id: string;
   display: string;
+  color?: string;
   subtext?: string;
   takesArg?: boolean;
-  icon: 'cmd' | 'model';
+  icon: 'cmd' | 'model' | 'effort';
 }
 
 export interface AgentSuggestHandle {

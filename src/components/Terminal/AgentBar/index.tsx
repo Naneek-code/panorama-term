@@ -1,11 +1,11 @@
 import React from 'react';
-import { Sparkles, ChevronDown } from 'lucide-react';
+import { Brain, Sparkles, ChevronDown } from 'lucide-react';
 
 import Suggest from './Suggest';
 import Magnifier from './Magnifier';
 import { writeTempImage } from '~/adapter/clipboard/clipboard.client';
 import { readFooter, modeKey, prettyMode, prettyModel, looksLikeClaude, detectExitBanner, parseStatusLines, detectSuggestTrigger } from './parse';
-import { BPM_END, draftKey, BPM_START, HISTORY_KEY, CLAUDE_MODELS, CLAUDE_SLASH_COMMANDS, MODEL_QUICK_SWITCHES } from './constants';
+import { BPM_END, draftKey, BPM_START, HISTORY_KEY, EFFORT_LEVELS, CLAUDE_MODELS, CLAUDE_SLASH_COMMANDS, MODEL_QUICK_SWITCHES } from './constants';
 import { cloneDraft, EMPTY_DRAFT, partsToDraft, draftToParts, isDraftEmpty, renderEditor, getCaretOffset, serializeEditor, placeCaretAtEnd, consolidateParts, draftToSendParts, insertPartsAtCaret, isCaretOnLastLine, isCaretOnFirstLine } from './editor';
 
 import type { ClaudeState } from '~/domain/interfaces/pty.interface';
@@ -79,10 +79,12 @@ const AgentBar = ({ tileId, active, send, getLines, getStructured, focusTerminal
   const [manualHide, setManualHide] = React.useState(false);
   const [submitting, setSubmitting] = React.useState(false);
   const [modelMenu, setModelMenu] = React.useState(false);
+  const [effortMenu, setEffortMenu] = React.useState(false);
   const [preview, setPreview] = React.useState<string | null>(null);
 
   const editorRef = React.useRef<HTMLDivElement>(null);
   const modelRef = React.useRef<HTMLDivElement>(null);
+  const effortRef = React.useRef<HTMLDivElement>(null);
   const suggestRef = React.useRef<AgentSuggestHandle>(null);
   const historyRef = React.useRef<ContentPart[][]>(history);
   const histIdxRef = React.useRef<number | null>(null);
@@ -262,13 +264,14 @@ const AgentBar = ({ tileId, active, send, getLines, getStructured, focusTerminal
   }, [claudeActive, active, hidden]);
 
   React.useEffect(() => {
-    if (!modelMenu) return;
+    if (!modelMenu && !effortMenu) return;
     const onDown = (e: MouseEvent) => {
       if (!modelRef.current?.contains(e.target as Node)) setModelMenu(false);
+      if (!effortRef.current?.contains(e.target as Node)) setEffortMenu(false);
     };
     window.addEventListener('mousedown', onDown, true);
     return () => window.removeEventListener('mousedown', onDown, true);
-  }, [modelMenu]);
+  }, [modelMenu, effortMenu]);
 
   const persistHistory = (next: { text: string; images: string[] }) => {
     const key = historyKey(next);
@@ -440,6 +443,17 @@ const AgentBar = ({ tileId, active, send, getLines, getStructured, focusTerminal
     ).map((m) => ({ id: m.name, display: m.name, subtext: m.desc, icon: 'model' }));
   }, []);
 
+  const fetchEfforts = React.useCallback((query: string): PromptSuggestion[] => {
+    const q = query.toLowerCase();
+    return EFFORT_LEVELS.filter((l) => l.id.includes(q) || l.desc.toLowerCase().includes(q)).map((l) => ({
+      id: l.id,
+      color: l.color,
+      display: l.id,
+      subtext: l.desc,
+      icon: 'effort'
+    }));
+  }, []);
+
   const onSlashSelect = (item: PromptSuggestion, submit?: boolean) => {
     const name = item.display;
     const noSubmit = name === '/model' || item.takesArg === true;
@@ -447,8 +461,18 @@ const AgentBar = ({ tileId, active, send, getLines, getStructured, focusTerminal
     const next = { text: name + (doSubmit ? '' : ' '), images: [] };
     setDraft(next);
     renderAndFocus(next);
-    setSuggest(name === '/model' ? { kind: 'model', query: '' } : null);
+    if (name === '/model') setSuggest({ kind: 'model', query: '' });
+    else if (name === '/effort') setSuggest({ kind: 'effort', query: '' });
+    else setSuggest(null);
     if (doSubmit) void handleSend();
+  };
+
+  const onEffortSelect = (item: PromptSuggestion, submit?: boolean) => {
+    const next = { text: `/effort ${item.display}`, images: [] };
+    setDraft(next);
+    renderAndFocus(next);
+    setSuggest(null);
+    if (submit) void handleSend();
   };
 
   const onModelSelect = (item: PromptSuggestion, submit?: boolean) => {
@@ -549,10 +573,9 @@ const AgentBar = ({ tileId, active, send, getLines, getStructured, focusTerminal
     if (scraped) {
       const t = scraped.model.toLowerCase();
       const oneM = /1m/i.test(scraped.contextInfo ?? '');
-      if (t.includes('sonnet')) {
-        const sm = t.match(/sonnet\s*(\d+)(?:[.\s-](\d+))?/);
-        if (!sm) return '';
-        const id = sm[2] ? `claude-sonnet-${sm[1]}-${sm[2]}` : `claude-sonnet-${sm[1]}`;
+      const sm = t.match(/(sonnet|fable)\s*(\d+)(?:[.\s-](\d+))?/);
+      if (sm) {
+        const id = sm[3] ? `claude-${sm[1]}-${sm[2]}-${sm[3]}` : `claude-${sm[1]}-${sm[2]}`;
         return `${id}${oneM ? '[1m]' : ''}`;
       }
       const m = t.match(/opus\s*(\d)[.\s-]?(\d)/);
@@ -582,9 +605,16 @@ const AgentBar = ({ tileId, active, send, getLines, getStructured, focusTerminal
     return base;
   }, [status, scraped, structured, is1M]);
 
-  const hasStatus = Boolean(parsed.model || parsed.mode || parsed.focused || parsed.progress != null);
+  const effort = structured?.effort ?? '';
+  const effortColor = EFFORT_LEVELS.find((l) => l.id === effort)?.color;
+
+  const hasStatus = Boolean(parsed.model || parsed.mode || parsed.focused || parsed.progress != null || effort);
+
+  const suggestFetch = { slash: fetchSlash, model: fetchModels, effort: fetchEfforts };
+  const suggestSelect = { slash: onSlashSelect, model: onModelSelect, effort: onEffortSelect };
 
   const toggleModelMenu = () => setModelMenu((o) => !o);
+  const toggleEffortMenu = () => setEffortMenu((o) => !o);
   const restore = () => setManualHide(false);
 
   const focusEditor = (e: React.MouseEvent<HTMLDivElement>) => {
@@ -600,6 +630,11 @@ const AgentBar = ({ tileId, active, send, getLines, getStructured, focusTerminal
   const pickModel = (id: string) => () => {
     void sendDraft({ text: `/model ${id}`, images: [] });
     setModelMenu(false);
+  };
+
+  const pickEffort = (id: string) => () => {
+    void sendDraft({ text: `/effort ${id}`, images: [] });
+    setEffortMenu(false);
   };
 
   if (!claudeActive) return null;
@@ -632,25 +667,54 @@ const AgentBar = ({ tileId, active, send, getLines, getStructured, focusTerminal
             onClick={handleEditorClick}
             onKeyDown={onKeyDown}
           />
-          <div className={styles.actions} ref={modelRef}>
-            <button type="button" className={styles.model} title="Switch model" onClick={toggleModelMenu}>
-              {MODEL_QUICK_SWITCHES.find((m) => m.id === currentModelId)?.title ?? 'Model'}
-              <ChevronDown size={11} />
-            </button>
-            {modelMenu && (
-              <div className={styles.menu}>
-                {MODEL_QUICK_SWITCHES.map((m) => (
-                  <button
-                    key={m.id}
-                    type="button"
-                    onClick={pickModel(m.id)}
-                    className={m.id === currentModelId ? `${styles.menuItem} ${styles.menuActive}` : styles.menuItem}
-                  >
-                    {m.title}
-                  </button>
-                ))}
-              </div>
-            )}
+          <div className={styles.actions}>
+            <div className={styles.action} ref={effortRef}>
+              <button
+                type="button"
+                title={effort ? `Effort: ${effort}` : 'Set effort'}
+                className={styles.effort}
+                style={effortColor ? { color: effortColor } : undefined}
+                onClick={toggleEffortMenu}
+              >
+                <Brain size={14} />
+              </button>
+              {effortMenu && (
+                <div className={styles.menu}>
+                  {EFFORT_LEVELS.map((l) => (
+                    <button
+                      key={l.id}
+                      type="button"
+                      style={{ color: l.color }}
+                      onClick={pickEffort(l.id)}
+                      className={l.id === effort ? `${styles.menuItem} ${styles.menuActive}` : styles.menuItem}
+                    >
+                      {l.id}
+                      <span className={styles.menuSub}>{l.desc}</span>
+                    </button>
+                  ))}
+                </div>
+              )}
+            </div>
+            <div className={styles.action} ref={modelRef}>
+              <button type="button" className={styles.model} title="Switch model" onClick={toggleModelMenu}>
+                {MODEL_QUICK_SWITCHES.find((m) => m.id === currentModelId)?.title ?? 'Model'}
+                <ChevronDown size={11} />
+              </button>
+              {modelMenu && (
+                <div className={styles.menu}>
+                  {MODEL_QUICK_SWITCHES.map((m) => (
+                    <button
+                      key={m.id}
+                      type="button"
+                      onClick={pickModel(m.id)}
+                      className={m.id === currentModelId ? `${styles.menuItem} ${styles.menuActive}` : styles.menuItem}
+                    >
+                      {m.title}
+                    </button>
+                  ))}
+                </div>
+              )}
+            </div>
           </div>
         </div>
         <div className={styles.hints}>
@@ -672,6 +736,12 @@ const AgentBar = ({ tileId, active, send, getLines, getStructured, focusTerminal
               <span className={styles.chip}>
                 <span className={styles.chipLabel}>{parsed.model}</span>
                 {parsed.contextInfo && <span className={styles.chipSub}>{parsed.contextInfo}</span>}
+              </span>
+            )}
+            {effort && (
+              <span className={styles.chip} style={effortColor ? { color: effortColor } : undefined}>
+                <Brain size={9} />
+                <span className={styles.chipLabel}>{effort}</span>
               </span>
             )}
             {parsed.focused && (
@@ -697,8 +767,8 @@ const AgentBar = ({ tileId, active, send, getLines, getStructured, focusTerminal
           <Suggest
             ref={suggestRef}
             query={suggest.query}
-            fetchFn={suggest.kind === 'model' ? fetchModels : fetchSlash}
-            onSelect={suggest.kind === 'model' ? onModelSelect : onSlashSelect}
+            fetchFn={suggestFetch[suggest.kind]}
+            onSelect={suggestSelect[suggest.kind]}
             onHighlight={suggest.kind === 'model' ? onModelHighlight : undefined}
             onClose={() => setSuggest(null)}
           />

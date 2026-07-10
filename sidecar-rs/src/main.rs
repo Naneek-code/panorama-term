@@ -200,13 +200,17 @@ fn claude_home() -> Option<PathBuf> {
     Some(Path::new(&home).join(".claude"))
 }
 
-fn default_model() -> Option<String> {
+fn settings_field(key: &str) -> Option<String> {
     let raw = std::fs::read_to_string(claude_home()?.join("settings.json")).ok()?;
     let v: serde_json::Value = serde_json::from_str(&raw).ok()?;
-    v.get("model")
+    v.get(key)
         .and_then(|m| m.as_str())
         .filter(|s| !s.is_empty())
         .map(|s| s.to_string())
+}
+
+fn default_model() -> Option<String> {
+    settings_field("model")
 }
 
 fn cwd_slug(cwd: &str) -> String {
@@ -283,6 +287,7 @@ struct ClaudeTracker {
     mode: Option<String>,
     perm: Option<String>,
     tokens: Option<u64>,
+    effort: Option<String>,
     default_model: Option<String>,
     status: Option<String>,
     status_path: Option<PathBuf>,
@@ -377,6 +382,7 @@ impl ClaudeTracker {
         if self.default_model.is_none() {
             self.default_model = default_model();
         }
+        self.effort = settings_field("effortLevel");
         if self.model.is_none() {
             self.model = self.default_model.clone();
         }
@@ -394,6 +400,9 @@ impl ClaudeTracker {
         }
         if let Some(t) = self.tokens {
             obj.insert("contextTokens".into(), t.into());
+        }
+        if let Some(e) = &self.effort {
+            obj.insert("effort".into(), e.clone().into());
         }
         if let Some(d) = &self.default_model {
             obj.insert("defaultModel".into(), d.clone().into());
