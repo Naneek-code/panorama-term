@@ -5,7 +5,7 @@
   "identifier": "com.frenvius.panorama",
   "build": {
     "beforeDevCommand": "bun run ui:dev",
-    "devUrl": "http://localhost:1420",
+    "devUrl": "http://localhost:1471",
     "beforeBuildCommand": "bun run ui:build",
     "frontendDist": "../dist"
   },

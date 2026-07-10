@@ -21,6 +21,7 @@ export interface ClaudeState {
   permissionMode?: string;
   contextTokens?: number;
   defaultModel?: string;
+  status?: string;
 }
 
 export interface PtyClaudeMessage extends ClaudeState {

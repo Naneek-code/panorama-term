@@ -232,6 +232,39 @@ fn find_transcript(session_id: &str, cwd: Option<&str>) -> Option<PathBuf> {
     None
 }
 
+fn status_from_session_json(raw: &str, agent_id: &str) -> Option<String> {
+    let v: serde_json::Value = serde_json::from_str(raw).ok()?;
+    if v.get("sessionId").and_then(|s| s.as_str()) != Some(agent_id) {
+        return None;
+    }
+    v.get("status").and_then(|s| s.as_str()).map(|s| s.to_string())
+}
+
+fn read_session_status(agent_id: &str, cached: &mut Option<PathBuf>) -> Option<String> {
+    let matches = |path: &Path| -> Option<String> {
+        let raw = std::fs::read_to_string(path).ok()?;
+        status_from_session_json(&raw, agent_id)
+    };
+    if let Some(path) = cached.clone() {
+        if let Some(status) = matches(&path) {
+            return Some(status);
+        }
+        *cached = None;
+    }
+    let dir = claude_home()?.join("sessions");
+    for entry in std::fs::read_dir(&dir).ok()?.flatten() {
+        let path = entry.path();
+        if path.extension().and_then(|e| e.to_str()) != Some("json") {
+            continue;
+        }
+        if let Some(status) = matches(&path) {
+            *cached = Some(path);
+            return Some(status);
+        }
+    }
+    None
+}
+
 fn usage_tokens(usage: &serde_json::Value) -> Option<u64> {
     let get = |k: &str| usage.get(k).and_then(|v| v.as_u64()).unwrap_or(0);
     let sum = get("input_tokens") + get("cache_read_input_tokens") + get("cache_creation_input_tokens");
@@ -251,6 +284,8 @@ struct ClaudeTracker {
     perm: Option<String>,
     tokens: Option<u64>,
     default_model: Option<String>,
+    status: Option<String>,
+    status_path: Option<PathBuf>,
     sent: Option<String>,
 }
 
@@ -334,6 +369,11 @@ impl ClaudeTracker {
             self.path = find_transcript(&id, self.cwd.as_deref());
         }
         self.tail();
+        if let Some(id) = self.agent_id.clone() {
+            if let Some(status) = read_session_status(&id, &mut self.status_path) {
+                self.status = Some(status);
+            }
+        }
         if self.default_model.is_none() {
             self.default_model = default_model();
         }
@@ -357,6 +397,9 @@ impl ClaudeTracker {
         }
         if let Some(d) = &self.default_model {
             obj.insert("defaultModel".into(), d.clone().into());
+        }
+        if let Some(s) = &self.status {
+            obj.insert("status".into(), s.clone().into());
         }
         if obj.len() == 1 {
             return None;
@@ -1500,6 +1543,13 @@ mod tests {
         assert_eq!(t.perm.as_deref(), Some("acceptEdits"));
         assert_eq!(t.model.as_deref(), Some("claude-opus-4-8"));
         assert_eq!(t.tokens, Some(17));
+    }
+
+    #[test]
+    fn status_matches_by_session_id() {
+        let raw = r#"{"pid":105884,"sessionId":"abc-123","cwd":"C:\\Users\\x","status":"waiting"}"#;
+        assert_eq!(super::status_from_session_json(raw, "abc-123").as_deref(), Some("waiting"));
+        assert_eq!(super::status_from_session_json(raw, "other"), None);
     }
 
     #[test]

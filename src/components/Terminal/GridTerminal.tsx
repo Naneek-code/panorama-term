@@ -1,6 +1,7 @@
 import React from 'react';
 
 import AgentBar from '~/components/Terminal/AgentBar';
+import { notifyClaude } from '~/components/commons/Notifications';
 import { termTheme, THEME_EVENT } from '~/usecase/util/theme';
 import { getSetting } from '~/adapter/settings/settings.client';
 import { scheduleConnect } from '~/usecase/util/connectScheduler';
@@ -67,6 +68,7 @@ const GridTerminal = ({ tileId, cwd, cols, rows, active, visible, k, restartKey,
   const wsRef = React.useRef<WebSocket | null>(null);
   const frameRef = React.useRef<GridFrame | null>(null);
   const claudeRef = React.useRef<ClaudeState | null>(null);
+  const statusRef = React.useRef<string | undefined>(undefined);
   const dirtyRef = React.useRef(true);
   const blinkRef = React.useRef(true);
   const selRef = React.useRef<Selection | null>(null);
@@ -75,7 +77,7 @@ const GridTerminal = ({ tileId, cwd, cols, rows, active, visible, k, restartKey,
   const mouseFwdRef = React.useRef(false);
   const mouseBtnRef = React.useRef(0);
   const lastFwdRef = React.useRef({ row: -1, col: -1 });
-  const pendingResumeRef = React.useRef(false);
+  const pendingResumeRef = React.useRef(true);
   const prevKRef = React.useRef(k);
   const maskRef = React.useRef(false);
   const prevDimsRef = React.useRef({ cols, rows });
@@ -272,11 +274,22 @@ const GridTerminal = ({ tileId, cwd, cols, rows, active, visible, k, restartKey,
           onExit: () => {},
           onClaude: (state) => {
             claudeRef.current = state;
+            const prev = statusRef.current;
+            const next = state.status;
+            if (next && next !== prev) {
+              statusRef.current = next;
+              const watching = activeRef.current && document.hasFocus();
+              if (prev !== undefined && !watching) {
+                if (prev === 'busy' && next === 'idle') notifyClaude(tileId, 'finished');
+                else if (next === 'waiting') notifyClaude(tileId, 'attention');
+              }
+            }
           },
           onCwd: (dir) => onCwdRef.current(tileId, dir),
           onReady: (info) => {
-            if (!pendingResumeRef.current || !info.resumeId || info.reused) return;
+            if (!pendingResumeRef.current) return;
             pendingResumeRef.current = false;
+            if (!info.resumeId || info.reused) return;
             const id = info.resumeId;
             setTimeout(() => {
               const w = wsRef.current;

@@ -9,6 +9,7 @@ import Minimap from '~/components/Canvas/Minimap';
 import TileFrame from '~/components/Canvas/TileFrame';
 import NoteToolbar from '~/components/Canvas/NoteToolbar';
 import ContextMenu from '~/components/commons/ContextMenu';
+import Notifications from '~/components/commons/Notifications';
 import { useCanvas } from '~/usecase/hooks/useCanvas';
 import { useWorkspace } from '~/usecase/context/WorkspaceContext';
 import { TILE_GAP, CULL_MARGIN, MIN_LIVE_WIDTH } from '~/usecase/util/constants';
@@ -249,6 +250,14 @@ const Canvas = () => {
     if (menu) addFrame(menu.wx, menu.wy);
   };
 
+  const openNotified = React.useCallback(
+    (id: string) => {
+      activateTile(id);
+      focusTile(id);
+    },
+    [activateTile, focusTile]
+  );
+
   return (
     <div className={fsId ? `${styles.root} ${styles.rootFs}` : styles.root}>
       <div
@@ -337,6 +346,7 @@ const Canvas = () => {
           ]}
         />
       )}
+      <Notifications tiles={tiles} onOpen={openNotified} />
     </div>
   );
 };
