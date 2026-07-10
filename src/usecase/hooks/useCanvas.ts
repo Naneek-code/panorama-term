@@ -259,17 +259,15 @@ export const useCanvas = ({ seed, onPersist }: UseCanvasArgs) => {
 
   const snapBack = React.useCallback(() => {
     const animate = () => {
-      let done = false;
-      setView((v) => {
-        const target = restTarget(v.k, maxZoom());
-        let k = v.k + (target - v.k) * 0.15;
-        if (Math.abs(k - target) < 0.001) {
-          k = target;
-          done = true;
-        }
-        const ratio = k / v.k - 1;
-        return { k, x: v.x - (focal.current.x - v.x) * ratio, y: v.y - (focal.current.y - v.y) * ratio };
-      });
+      const v = viewRef.current;
+      const target = restTarget(v.k, maxZoom());
+      let k = v.k + (target - v.k) * 0.15;
+      const done = Math.abs(k - target) < 0.001;
+      if (done) k = target;
+      const ratio = k / v.k - 1;
+      const next = { k, x: v.x - (focal.current.x - v.x) * ratio, y: v.y - (focal.current.y - v.y) * ratio };
+      viewRef.current = next;
+      setView(next);
       snapRaf.current = done ? 0 : requestAnimationFrame(animate);
     };
     snapRaf.current = requestAnimationFrame(animate);
@@ -296,21 +294,22 @@ export const useCanvas = ({ seed, onPersist }: UseCanvasArgs) => {
     focal.current = { x: px, y: py };
 
     const ceil = maxZoom();
-    setView((v) => {
-      const clamped = Math.sign(e.deltaY) * Math.min(Math.abs(e.deltaY), MAX_ZOOM_DELTA);
-      let factor = Math.exp((-clamped * 0.6) / 100);
-      if (v.k >= ceil && factor > 1) {
-        const overshoot = v.k / ceil - 1;
-        factor = 1 + (factor - 1) / (1 + overshoot * RUBBER_K);
-      } else if (v.k <= ZOOM_MIN && factor < 1) {
-        const overshoot = ZOOM_MIN / v.k - 1;
-        factor = 1 - (1 - factor) / (1 + overshoot * RUBBER_K);
-      }
-      const k = v.k * factor;
-      const ratio = k / v.k - 1;
-      if (k > ceil || k < ZOOM_MIN) snapTimer.current = setTimeout(snapBack, SNAP_DELAY);
-      return { k, x: v.x - (px - v.x) * ratio, y: v.y - (py - v.y) * ratio };
-    });
+    const v = viewRef.current;
+    const clamped = Math.sign(e.deltaY) * Math.min(Math.abs(e.deltaY), MAX_ZOOM_DELTA);
+    let factor = Math.exp((-clamped * 0.6) / 100);
+    if (v.k >= ceil && factor > 1) {
+      const overshoot = v.k / ceil - 1;
+      factor = 1 + (factor - 1) / (1 + overshoot * RUBBER_K);
+    } else if (v.k <= ZOOM_MIN && factor < 1) {
+      const overshoot = ZOOM_MIN / v.k - 1;
+      factor = 1 - (1 - factor) / (1 + overshoot * RUBBER_K);
+    }
+    const k = v.k * factor;
+    const ratio = k / v.k - 1;
+    const next = { k, x: v.x - (px - v.x) * ratio, y: v.y - (py - v.y) * ratio };
+    viewRef.current = next;
+    setView(next);
+    if (k > ceil || k < ZOOM_MIN) snapTimer.current = setTimeout(snapBack, SNAP_DELAY);
   };
 
   const onBgPointerDown = (e: React.PointerEvent) => {
