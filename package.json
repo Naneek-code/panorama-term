@@ -7,7 +7,7 @@
   "scripts": {
     "dev": "tauri dev",
     "build": "tauri build",
-    "ui:dev": "vite",
+    "ui:dev": "bun scripts/dev.ts",
     "ui:build": "vite build",
     "sidecar": "cargo build --manifest-path sidecar-rs/Cargo.toml",
     "tauri": "tauri"

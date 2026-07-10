@@ -1,0 +1,29 @@
+import { spawn, spawnSync } from 'node:child_process';
+import { existsSync } from 'node:fs';
+import { join } from 'node:path';
+
+const isWin = process.platform === 'win32';
+const bin = join('sidecar-rs', 'target', 'debug', isWin ? 'sidecar.exe' : 'sidecar');
+
+const build = spawnSync('cargo', ['build', '--manifest-path', 'sidecar-rs/Cargo.toml'], {
+  stdio: 'inherit'
+});
+if (build.status !== 0 || !existsSync(bin)) {
+  console.error('[dev] sidecar build failed');
+  process.exit(1);
+}
+
+const sidecar = spawn(bin, [], { stdio: 'ignore' });
+const vite = spawn('bunx', ['vite'], { stdio: 'inherit', shell: isWin });
+
+const shutdown = () => {
+  sidecar.kill();
+  vite.kill();
+  process.exit();
+};
+process.on('SIGINT', shutdown);
+process.on('SIGTERM', shutdown);
+vite.on('exit', (code) => {
+  sidecar.kill();
+  process.exit(code ?? 0);
+});
