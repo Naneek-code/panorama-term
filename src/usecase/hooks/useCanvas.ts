@@ -194,6 +194,29 @@ export const useCanvas = ({ seed, onPersist }: UseCanvasArgs) => {
     });
   }, []);
 
+  const addCode = React.useCallback((cwd: string, filePath: string) => {
+    setView((v) => {
+      const cx = (window.innerWidth / 2 - v.x) / v.k;
+      const cy = ((window.innerHeight - TOOLBAR_HEIGHT) / 2 - v.y) / v.k;
+      setTiles((prev) => [
+        ...prev,
+        {
+          id: createId(),
+          type: 'code',
+          cwd,
+          filePath,
+          autoTitle: filePath.split(/[\\/]/).pop(),
+          x: cx - TILE_WIDTH / 2,
+          y: cy - TILE_HEIGHT / 2,
+          width: TILE_WIDTH,
+          height: TILE_HEIGHT,
+          zIndex: prev.reduce((m, t) => Math.max(m, t.zIndex), 0) + 1
+        }
+      ]);
+      return v;
+    });
+  }, []);
+
   const patchTile = React.useCallback((id: string, patch: Partial<Tile>) => {
     setTiles((prev) => prev.map((t) => (t.id === id ? { ...t, ...patch } : t)));
   }, []);
@@ -530,6 +553,7 @@ export const useCanvas = ({ seed, onPersist }: UseCanvasArgs) => {
     gridRef,
     onWheel,
     addTile,
+    addCode,
     patchTile,
     addFrame,
     duplicateTile,

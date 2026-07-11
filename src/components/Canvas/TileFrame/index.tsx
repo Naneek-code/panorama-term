@@ -6,6 +6,7 @@ import type { Tile, View } from '~/domain/interfaces/canvas.interface';
 import type { ContextMenuEntry } from '~/components/commons/ContextMenu';
 import type { NotifyKind } from '~/components/commons/Notifications/bridge';
 import NoteTile from '~/components/Canvas/NoteTile';
+import DiffViewer from '~/components/DiffViewer';
 import { noteTextColor } from '~/usecase/util/note';
 import ClaudeLogo from '~/components/commons/ClaudeLogo';
 import ContextMenu from '~/components/commons/ContextMenu';
@@ -120,6 +121,7 @@ const TileFrame = ({ tile, view, active, alert, visible, live, hidden, fullscree
     || `${tile.type} · ${tile.id}`;
 
   const note = tile.type === 'note';
+  const code = tile.type === 'code';
   const noteTint = note ? { background: tile.color, color: noteTextColor(tile.color || '#fef8c4') } : null;
   const copyNote = () => onCopyNote(tile.id);
   const changeTitle = (e: React.ChangeEvent<HTMLInputElement>) => onNoteTitle(tile.id, e.target.value);
@@ -303,7 +305,7 @@ const TileFrame = ({ tile, view, active, alert, visible, live, hidden, fullscree
             <button className={styles.action} onClick={toggleFullscreen} aria-label="Toggle fullscreen">
               {fullscreen ? <Minimize size={13} strokeWidth={2} /> : <Maximize size={13} strokeWidth={2} />}
             </button>
-            {!note && (
+            {!note && !code && (
               <button className={styles.action} onClick={restartTile} aria-label="Restart terminal">
                 <RotateCw size={13} strokeWidth={2} />
               </button>
@@ -316,11 +318,11 @@ const TileFrame = ({ tile, view, active, alert, visible, live, hidden, fullscree
           </div>
         </div>
         <div className={styles.body}>
-          {note ? (
+          {note && (
             <NoteTile tile={tile} active={active} onChange={onNoteChange} onActivate={onActivate} onEditor={onNoteEditor} />
-          ) : (
-            !term && <div className={styles.placeholder}>{tile.type !== 'term' ? label : ''}</div>
           )}
+          {code && tile.cwd && tile.filePath && <DiffViewer root={tile.cwd} file={tile.filePath} embedded />}
+          {!note && !code && !term && <div className={styles.placeholder}>{tile.type !== 'term' ? label : ''}</div>}
         </div>
       </div>
       {term && (

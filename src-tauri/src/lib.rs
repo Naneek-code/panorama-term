@@ -362,7 +362,11 @@ pub fn run() {
             git::git_status,
             git::git_commit,
             git::git_log_messages,
-            git::git_unpushed_commits
+            git::git_unpushed_commits,
+            git::git_diff_file,
+            git::git_revert_hunk,
+            git::git_watch_file,
+            git::git_unwatch_file
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

@@ -1,6 +1,7 @@
 import { invoke } from '@tauri-apps/api/core';
 
 import type {
+  FileDiff,
   CommitInfo,
   BranchSnapshot,
   StatusSnapshot,
@@ -65,3 +66,14 @@ export const gitLogMessages = (path: string, limit = 20): Promise<CommitMessageE
 
 export const gitUnpushedCommits = (path: string): Promise<CommitMessageEntry[]> =>
   invoke<CommitMessageEntry[]>('git_unpushed_commits', { path });
+
+export const gitDiffFile = (path: string, file: string): Promise<FileDiff> =>
+  invoke<FileDiff>('git_diff_file', { path, file });
+
+export const gitRevertHunk = (path: string, file: string, content: string, crlf: boolean): Promise<void> =>
+  invoke<void>('git_revert_hunk', { path, file, content, crlf });
+
+export const gitWatchFile = (path: string, file: string): Promise<number> =>
+  invoke<number>('git_watch_file', { path, file });
+
+export const gitUnwatchFile = (id: number): Promise<void> => invoke<void>('git_unwatch_file', { id });

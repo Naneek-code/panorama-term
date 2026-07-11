@@ -6,7 +6,12 @@ export type CommandId =
   | 'note.new'
   | 'tile.close'
   | 'view.resetZoom'
-  | 'view.navigator';
+  | 'view.navigator'
+  | 'diff.close'
+  | 'diff.prevChunk'
+  | 'diff.nextChunk'
+  | 'diff.prevFile'
+  | 'diff.nextFile';
 
 interface Command {
   id: CommandId;
@@ -25,7 +30,12 @@ export const KEYBINDINGS: Command[] = [
   { id: 'tile.close', label: 'Close active tile', group: 'Canvas', defaultCombo: 'mod+w' },
   { id: 'tile.fullscreen', label: 'Toggle fullscreen', group: 'Canvas', defaultCombo: 'mod+shift+f' },
   { id: 'view.resetZoom', label: 'Reset zoom', group: 'View', defaultCombo: 'mod+0' },
-  { id: 'view.navigator', label: 'Toggle navigator', group: 'View', defaultCombo: 'mod+b' }
+  { id: 'view.navigator', label: 'Toggle navigator', group: 'View', defaultCombo: 'mod+b' },
+  { id: 'diff.close', label: 'Close viewer', group: 'Diff viewer', defaultCombo: 'escape' },
+  { id: 'diff.prevChunk', label: 'Previous difference', group: 'Diff viewer', defaultCombo: 'alt+arrowup' },
+  { id: 'diff.nextChunk', label: 'Next difference', group: 'Diff viewer', defaultCombo: 'alt+arrowdown' },
+  { id: 'diff.prevFile', label: 'Previous file', group: 'Diff viewer', defaultCombo: 'alt+arrowleft' },
+  { id: 'diff.nextFile', label: 'Next file', group: 'Diff viewer', defaultCombo: 'alt+arrowright' }
 ];
 
 const overrides = (): Record<string, string> => getSetting<Record<string, string>>(BINDINGS_KEY, {});

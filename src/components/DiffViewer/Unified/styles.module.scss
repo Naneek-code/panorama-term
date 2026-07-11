@@ -1,0 +1,65 @@
+.unified {
+  min-width: 0;
+  min-height: 0;
+  flex: 1;
+  overflow: auto;
+  color: var(--text-1);
+  font-family: var(--font-mono);
+  background: var(--surface-1);
+  scrollbar-width: thin;
+  scrollbar-color: var(--border-2) transparent;
+}
+
+.row {
+  display: flex;
+  align-items: center;
+  white-space: nowrap;
+  content-visibility: auto;
+  contain-intrinsic-block-size: 18px;
+
+  &[data-kind='deleted'] {
+    background: rgba(168, 49, 47, 0.22);
+  }
+
+  &[data-kind='added'] {
+    background: rgba(42, 124, 64, 0.22);
+  }
+}
+
+.skip {
+  display: block;
+  width: 100%;
+  padding: 0;
+  border: none;
+  cursor: pointer;
+  background: repeating-linear-gradient(-45deg, var(--surface-2), var(--surface-2) 4px, transparent 4px, transparent 8px);
+
+  &:hover {
+    background: var(--border-1);
+  }
+}
+
+.no {
+  width: 46px;
+  flex: none;
+  padding: 0 6px;
+  color: var(--text-dim);
+  text-align: right;
+  font-size: 11px;
+  font-variant-numeric: tabular-nums;
+  user-select: none;
+}
+
+.newNo {
+  margin-right: 4px;
+  border-right: 1px solid var(--border-1);
+}
+
+.code {
+  flex: 1;
+  margin: 0;
+  padding: 0 8px;
+  white-space: pre;
+  font-size: 12px;
+  font-family: inherit;
+}

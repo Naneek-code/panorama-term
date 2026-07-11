@@ -65,6 +65,7 @@
   min-height: 0;
   flex: 1;
   overflow-y: auto;
+  outline: none;
   scrollbar-width: thin;
   scrollbar-color: var(--border-2) transparent;
 }
@@ -125,6 +126,10 @@
 
   &:hover {
     background: var(--hover-1);
+  }
+
+  &[data-active='true'] {
+    background: var(--hover-3);
   }
 }
 
@@ -268,7 +273,7 @@
 .historyMeta {
   color: var(--text-dim);
   font-size: 10px;
-  font-family: 'Geist Mono', ui-monospace, monospace;
+  font-family: var(--font-mono);
 }
 
 .message {

@@ -1,0 +1,71 @@
+.root {
+  position: relative;
+  display: inline-block;
+}
+
+.button {
+  display: flex;
+  height: 24px;
+  align-items: center;
+  gap: 4px;
+  padding: 0 6px;
+  border: none;
+  cursor: pointer;
+  color: var(--text-1);
+  border-radius: 5px;
+  font-size: 12px;
+  font-family: inherit;
+  white-space: nowrap;
+  background: transparent;
+
+  > svg {
+    flex: none;
+    color: var(--text-muted);
+  }
+
+  &:hover {
+    background: var(--hover-2);
+  }
+
+  &:disabled {
+    cursor: default;
+    opacity: 0.45;
+  }
+}
+
+.menu {
+  position: absolute;
+  top: calc(100% + 4px);
+  left: 0;
+  z-index: 10;
+  display: flex;
+  min-width: 100%;
+  flex-direction: column;
+  padding: 4px;
+  border: 1px solid var(--border-2);
+  border-radius: 8px;
+  background: var(--surface-2);
+  box-shadow: var(--shadow-pop);
+}
+
+.item {
+  padding: 5px 8px;
+  border: none;
+  cursor: pointer;
+  color: var(--text-1);
+  border-radius: 5px;
+  font-size: 12px;
+  font-family: inherit;
+  white-space: nowrap;
+  text-align: left;
+  background: transparent;
+
+  &:hover {
+    background: var(--hover-2);
+  }
+
+  &[data-active='true'] {
+    color: var(--text-strong);
+    background: var(--hover-3);
+  }
+}

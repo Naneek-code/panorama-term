@@ -62,6 +62,9 @@ interface NavigatorProps {
   onFocusFrame: (id: string) => void;
   onRenameTile: (id: string, title: string) => void;
   onCloseTile: (id: string) => void;
+  activeDiff: string | null;
+  onDiffFiles: (files: string[]) => void;
+  onOpenDiff: (root: string, file: string) => void;
   onClose: () => void;
 }
 
@@ -84,6 +87,9 @@ const Navigator = ({
   onFocusFrame,
   onRenameTile,
   onCloseTile,
+  activeDiff,
+  onDiffFiles,
+  onOpenDiff,
   onClose
 }: NavigatorProps) => {
   const [tab, setTab] = React.useState<'files' | 'tiles' | 'git'>('files');
@@ -93,6 +99,12 @@ const Navigator = ({
   const [renaming, setRenaming] = React.useState<string | null>(null);
   const [draft, setDraft] = React.useState('');
   const [menu, setMenu] = React.useState<Menu | null>(null);
+
+  React.useEffect(() => {
+    const root = document.documentElement;
+    root.style.setProperty('--nav-inset', `${width + 8}px`);
+    return () => root.style.setProperty('--nav-inset', '0px');
+  }, [width]);
 
   const needle = query.trim().toLowerCase();
   const { members, loose } = React.useMemo(() => groupByFrame(frames, tiles), [frames, tiles]);
@@ -268,7 +280,14 @@ const Navigator = ({
 
       {tab === 'git' &&
         (root ? (
-          <GitTab key={root} root={root} query="" />
+          <GitTab
+            key={root}
+            root={root}
+            query=""
+            active={activeDiff}
+            onFiles={onDiffFiles}
+            onOpenDiff={(file) => onOpenDiff(root, file)}
+          />
         ) : (
           <div className={styles.empty}>Focus a terminal to see its repo</div>
         ))}

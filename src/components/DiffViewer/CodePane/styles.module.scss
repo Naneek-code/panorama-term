@@ -1,0 +1,75 @@
+.pane {
+  min-width: 0;
+  min-height: 0;
+  flex: 1;
+  overflow: auto;
+  color: var(--text-1);
+  font-family: var(--font-mono);
+  background: var(--surface-1);
+  scrollbar-width: thin;
+  scrollbar-color: var(--border-2) transparent;
+
+  &[data-side='orig'] {
+    direction: rtl;
+  }
+}
+
+.content {
+  position: relative;
+  min-width: 100%;
+  direction: ltr;
+}
+
+.line {
+  position: absolute;
+  right: 0;
+  left: 0;
+  margin: 0;
+  padding: 0 12px;
+  white-space: pre;
+  font-size: 12px;
+  font-family: inherit;
+  tab-size: 4;
+
+  &[data-current='true'] {
+    box-shadow: inset 2px 0 0 var(--accent);
+  }
+}
+
+.skip {
+  position: absolute;
+  right: 0;
+  left: 0;
+  padding: 0;
+  border: none;
+  cursor: pointer;
+  background: repeating-linear-gradient(-45deg, var(--surface-2), var(--surface-2) 4px, transparent 4px, transparent 8px);
+
+  &:hover {
+    background: var(--border-1);
+  }
+}
+
+.insert {
+  background: rgba(42, 124, 64, 0.22);
+}
+
+.delete {
+  background: rgba(168, 49, 47, 0.22);
+}
+
+.modify {
+  background: rgba(33, 66, 131, 0.28);
+}
+
+.hl-insert {
+  background: rgba(128, 184, 122, 0.5);
+}
+
+.hl-delete {
+  background: rgba(217, 124, 124, 0.5);
+}
+
+.hl-modify {
+  background: rgba(123, 166, 220, 0.5);
+}

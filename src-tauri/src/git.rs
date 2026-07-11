@@ -2,8 +2,12 @@ use std::collections::{HashMap, HashSet};
 use std::fs;
 use std::path::PathBuf;
 use std::process::Command;
+use std::sync::atomic::{AtomicU32, Ordering};
+use std::sync::{Mutex, OnceLock};
 
 use serde::Serialize;
+use tauri::Emitter;
+use notify::{RecommendedWatcher, RecursiveMode, Watcher};
 
 #[derive(Serialize)]
 pub struct LocalBranch {
@@ -693,4 +697,122 @@ pub fn git_toggle_branch_favorite(
     }
     write_favorites(&map)?;
     snapshot(&path)
+}
+
+#[derive(Serialize)]
+pub struct FileDiff {
+    old: String,
+    new: String,
+    binary: bool,
+    crlf: bool,
+}
+
+fn is_binary(text: &[u8]) -> bool {
+    text.iter().take(8000).any(|b| *b == 0)
+}
+
+fn rename_source(repo: &str, file: &str) -> Option<String> {
+    let out = run_git(repo, &["diff", "-M", "--name-status", "HEAD", "--", file]).ok()?;
+    out.lines().find_map(|line| {
+        let mut cols = line.split('\t');
+        let status = cols.next()?;
+        if !status.starts_with('R') {
+            return None;
+        }
+        let from = cols.next()?;
+        let to = cols.next()?;
+        (to == file).then(|| from.to_string())
+    })
+}
+
+#[tauri::command]
+pub fn git_diff_file(path: String, file: String) -> Result<FileDiff, String> {
+    let mut old = run_git(&path, &["show", &format!("HEAD:{}", file)]).unwrap_or_default();
+
+    if old.is_empty() {
+        if let Some(from) = rename_source(&path, &file) {
+            old = run_git(&path, &["show", &format!("HEAD:{}", from)]).unwrap_or_default();
+        }
+    }
+
+    let full = PathBuf::from(&path).join(&file);
+    let bytes = fs::read(&full).unwrap_or_default();
+    if is_binary(&bytes) || is_binary(old.as_bytes()) {
+        return Ok(FileDiff {
+            old: String::new(),
+            new: String::new(),
+            binary: true,
+            crlf: false,
+        });
+    }
+
+    let new = String::from_utf8_lossy(&bytes).into_owned();
+    let crlf = new.contains("\r\n");
+
+    Ok(FileDiff {
+        old: old.replace("\r\n", "\n"),
+        new: new.replace("\r\n", "\n"),
+        binary: false,
+        crlf,
+    })
+}
+
+static NEXT_WATCH: AtomicU32 = AtomicU32::new(1);
+
+fn watchers() -> &'static Mutex<HashMap<u32, RecommendedWatcher>> {
+    static WATCHERS: OnceLock<Mutex<HashMap<u32, RecommendedWatcher>>> = OnceLock::new();
+    WATCHERS.get_or_init(|| Mutex::new(HashMap::new()))
+}
+
+#[tauri::command]
+pub fn git_watch_file(app: tauri::AppHandle, path: String, file: String) -> Result<u32, String> {
+    let full = PathBuf::from(&path).join(&file);
+    let dir = full.parent().ok_or("no parent dir")?.to_path_buf();
+    let name = full.file_name().ok_or("no file name")?.to_os_string();
+    let git_dir = PathBuf::from(&path).join(".git");
+
+    let mut watcher = notify::recommended_watcher(move |res: Result<notify::Event, notify::Error>| {
+        let Ok(event) = res else { return };
+        if event.kind.is_access() {
+            return;
+        }
+        let relevant = event
+            .paths
+            .iter()
+            .any(|p| p.file_name().is_some_and(|n| n == name || n == "HEAD" || n == "index"));
+        if relevant {
+            let _ = app.emit(
+                "diff:changed",
+                serde_json::json!({ "root": path, "file": file }),
+            );
+        }
+    })
+    .map_err(|e| e.to_string())?;
+
+    watcher
+        .watch(&dir, RecursiveMode::NonRecursive)
+        .map_err(|e| e.to_string())?;
+    if git_dir.is_dir() {
+        let _ = watcher.watch(&git_dir, RecursiveMode::NonRecursive);
+    }
+
+    let id = NEXT_WATCH.fetch_add(1, Ordering::Relaxed);
+    watchers().lock().unwrap().insert(id, watcher);
+    Ok(id)
+}
+
+#[tauri::command]
+pub fn git_unwatch_file(id: u32) {
+    watchers().lock().unwrap().remove(&id);
+}
+
+#[tauri::command]
+pub fn git_revert_hunk(path: String, file: String, content: String, crlf: bool) -> Result<(), String> {
+    let full = PathBuf::from(&path).join(&file);
+    let text = if crlf {
+        content.replace('\n', "\r\n")
+    } else {
+        content
+    };
+    fs::write(&full, text).map_err(|e| e.to_string())
 }

@@ -10,6 +10,7 @@ import FrameBar from '~/components/Canvas/FrameBar';
 import Minimap from '~/components/Canvas/Minimap';
 import TileFrame from '~/components/Canvas/TileFrame';
 import Navigator from '~/components/Canvas/Navigator';
+import DiffViewer from '~/components/DiffViewer';
 import NoteToolbar from '~/components/Canvas/NoteToolbar';
 import ContextMenu from '~/components/commons/ContextMenu';
 import { useCanvas } from '~/usecase/hooks/useCanvas';
@@ -21,6 +22,7 @@ import { isCapturing, getBinding, formatCombo, matchCommand, type CommandId } fr
 import styles from './styles.module.scss';
 
 const FS_ANIM = 170;
+const DIFF_ANIM = 130;
 
 interface Menu {
   sx: number;
@@ -40,6 +42,7 @@ const Canvas = () => {
     endPan,
     addNote,
     addTile,
+    addCode,
     patchTile,
     addFrame,
     gridRef,
@@ -74,6 +77,10 @@ const Canvas = () => {
   const [fsId, setFsId] = React.useState<string | null>(null);
   const [fsExit, setFsExit] = React.useState(false);
   const [navOpen, setNavOpen] = React.useState(false);
+  const [diff, setDiff] = React.useState<{ root: string; file: string } | null>(null);
+  const [diffFiles, setDiffFiles] = React.useState<string[]>([]);
+  const [diffExit, setDiffExit] = React.useState(false);
+  const diffTimer = React.useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
   const fsIdRef = React.useRef<string | null>(fsId);
   fsIdRef.current = fsId;
   const activeTileRef = React.useRef<string | null>(activeTile);
@@ -86,6 +93,8 @@ const Canvas = () => {
     window.addEventListener('resize', onResize);
     return () => window.removeEventListener('resize', onResize);
   }, []);
+
+  React.useEffect(() => () => clearTimeout(diffTimer.current), []);
 
   const exitFs = React.useCallback(() => {
     clearTimeout(fsTimer.current);
@@ -321,6 +330,32 @@ const Canvas = () => {
   const hideNav = () => setNavOpen(false);
   const showNav = () => setNavOpen(true);
 
+  const openDiff = (root: string, file: string) => {
+    clearTimeout(diffTimer.current);
+    setDiffExit(false);
+    setDiff({ root, file });
+  };
+
+  const closeDiff = () => {
+    setDiffExit(true);
+    diffTimer.current = setTimeout(() => {
+      setDiff(null);
+      setDiffExit(false);
+    }, DIFF_ANIM);
+  };
+
+  const diffToCanvas = () => {
+    if (!diff) return;
+    addCode(diff.root, diff.file);
+    closeDiff();
+  };
+
+  const diffAt = diff ? diffFiles.indexOf(diff.file) : -1;
+  const stepFile = (step: number) => () => {
+    if (!diff) return;
+    setDiff({ root: diff.root, file: diffFiles[diffAt + step] });
+  };
+
   useNotifyBridge({ tiles, activeTile, onOpen: openNotified, onAlert: addAlert, onClear: clearAlert });
 
   React.useEffect(() => {
@@ -413,7 +448,21 @@ const Canvas = () => {
           onFocusFrame={focusFrame}
           onRenameTile={setTileTitle}
           onCloseTile={closeTile}
+          activeDiff={diff?.file ?? null}
+          onDiffFiles={setDiffFiles}
+          onOpenDiff={openDiff}
           onClose={hideNav}
+        />
+      )}
+      {!fsId && diff && (
+        <DiffViewer
+          root={diff.root}
+          file={diff.file}
+          exiting={diffExit}
+          onClose={closeDiff}
+          onPrevFile={diffAt > 0 ? stepFile(-1) : undefined}
+          onNextFile={diffAt >= 0 && diffAt < diffFiles.length - 1 ? stepFile(1) : undefined}
+          onAddToCanvas={diffToCanvas}
         />
       )}
       {!fsId && !navOpen && (

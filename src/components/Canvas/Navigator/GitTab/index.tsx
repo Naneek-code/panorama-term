@@ -30,7 +30,12 @@ import styles from './styles.module.scss';
 interface GitTabProps {
   root: string;
   query: string;
+  active: string | null;
+  onFiles: (files: string[]) => void;
+  onOpenDiff: (file: string) => void;
 }
+
+const stopClick = (e: React.MouseEvent) => e.stopPropagation();
 
 const STATUS_COLOR: Record<string, string> = {
   modified: '#5781ea',
@@ -92,6 +97,12 @@ const collectPaths = (nodes: TreeNode[]): string[] =>
 const collectFolderIds = (nodes: TreeNode[]): string[] =>
   nodes.flatMap((node) => (node.kind === 'folder' ? [node.id, ...collectFolderIds(node.children)] : []));
 
+const flattenTree = (nodes: TreeNode[], shut: (id: string) => boolean): string[] =>
+  nodes.flatMap((node) => {
+    if (node.kind === 'file') return [node.change.path];
+    return shut(node.id) ? [] : flattenTree(node.children, shut);
+  });
+
 interface TriCheckboxProps {
   state: 'all' | 'none' | 'partial';
   onChange: (on: boolean) => void;
@@ -110,7 +121,8 @@ const TriCheckbox = ({ state, onChange }: TriCheckboxProps) => {
   return <input ref={ref} type="checkbox" checked={state === 'all'} onChange={change} onClick={stop} />;
 };
 
-const GitTab = ({ root, query }: GitTabProps) => {
+const GitTab = ({ root, query, active, onFiles, onOpenDiff }: GitTabProps) => {
+  const listRef = React.useRef<HTMLDivElement>(null);
   const [status, setStatus] = React.useState<StatusSnapshot | null>(null);
   const [selected, setSelected] = React.useState<Set<string>>(() => new Set());
   const [msg, setMsg] = React.useState('');
@@ -193,6 +205,53 @@ const GitTab = ({ root, query }: GitTabProps) => {
 
   const needle = query.trim().toLowerCase();
   const matches = (file: FileChange): boolean => !needle || file.path.toLowerCase().includes(needle);
+
+  const visible = React.useMemo(() => {
+    if (!status) return [];
+
+    const shut = (id: string) => !needle && collapsed.has(id);
+    const sections: Array<[string, FileChange[]]> = [
+      ['changes', status.changes],
+      ['unversioned', status.unversioned]
+    ];
+    const out: string[] = [];
+
+    for (const [id, files] of sections) {
+      if (files.length === 0 || shut(id)) continue;
+      const shown = files.filter((file) => !needle || file.path.toLowerCase().includes(needle));
+      if (groupBy === 'directory') out.push(...flattenTree(buildDirTree(shown, id), shut));
+      else out.push(...shown.map((file) => file.path));
+    }
+
+    return out;
+  }, [status, needle, collapsed, groupBy]);
+
+  React.useEffect(() => {
+    onFiles(visible);
+  }, [visible, onFiles]);
+
+  React.useEffect(() => {
+    if (!active) return;
+    listRef.current?.querySelector('[data-active="true"]')?.scrollIntoView({ block: 'nearest' });
+  }, [active]);
+
+  const openDiff = (path: string) => {
+    listRef.current?.focus({ preventScroll: true });
+    onOpenDiff(path);
+  };
+
+  const onArrows = (e: React.KeyboardEvent) => {
+    if (e.key !== 'ArrowDown' && e.key !== 'ArrowUp') return;
+    if (visible.length === 0) return;
+    e.preventDefault();
+
+    const step = e.key === 'ArrowDown' ? 1 : -1;
+    const at = active ? visible.indexOf(active) : -1;
+    const next = at === -1 ? (step === 1 ? 0 : visible.length - 1) : at + step;
+    if (next < 0 || next >= visible.length) return;
+
+    onOpenDiff(visible[next]);
+  };
 
   const toggle = (path: string) => {
     setSelected((prev) => {
@@ -352,10 +411,18 @@ const GitTab = ({ root, query }: GitTabProps) => {
     const file = node.change;
     const key = statusKey(file);
     const pick = () => toggle(file.path);
+    const view = () => openDiff(file.path);
 
     return (
-      <label key={node.id} className={styles.row} style={{ paddingLeft: pad + 16 }} title={file.path}>
-        <input type="checkbox" checked={selected.has(file.path)} onChange={pick} />
+      <div
+        key={node.id}
+        className={styles.row}
+        style={{ paddingLeft: pad + 16 }}
+        title={file.path}
+        onClick={view}
+        data-active={file.path === active}
+      >
+        <input type="checkbox" checked={selected.has(file.path)} onChange={pick} onClick={stopClick} />
         <FileIcon name={file.name} size={14} />
         <span
           className={styles.name}
@@ -363,16 +430,24 @@ const GitTab = ({ root, query }: GitTabProps) => {
         >
           {file.name}
         </span>
-      </label>
+      </div>
     );
   };
 
   const flatRow = (file: FileChange) => {
     const key = statusKey(file);
     const pick = () => toggle(file.path);
+    const view = () => openDiff(file.path);
     return (
-      <label key={file.path} className={styles.row} style={{ paddingLeft: 43 }} title={file.path}>
-        <input type="checkbox" checked={selected.has(file.path)} onChange={pick} />
+      <div
+        key={file.path}
+        className={styles.row}
+        style={{ paddingLeft: 43 }}
+        title={file.path}
+        onClick={view}
+        data-active={file.path === active}
+      >
+        <input type="checkbox" checked={selected.has(file.path)} onChange={pick} onClick={stopClick} />
         <FileIcon name={file.name} size={14} />
         <span
           className={styles.fileName}
@@ -381,7 +456,7 @@ const GitTab = ({ root, query }: GitTabProps) => {
           {file.name}
         </span>
         {file.dir && <span className={styles.dir}>{displayDir(file.dir)}</span>}
-      </label>
+      </div>
     );
   };
 
@@ -439,7 +514,7 @@ const GitTab = ({ root, query }: GitTabProps) => {
         </button>
       </div>
 
-      <div className={styles.list}>
+      <div ref={listRef} className={styles.list} tabIndex={-1} onKeyDown={onArrows}>
         {!status && !error && (
           <div className={styles.notice}>
             <LoaderCircle size={16} strokeWidth={2} className={styles.spinning} />

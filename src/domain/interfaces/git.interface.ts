@@ -43,6 +43,13 @@ export interface StatusSnapshot {
   unversioned: FileChange[];
 }
 
+export interface FileDiff {
+  old: string;
+  new: string;
+  binary: boolean;
+  crlf: boolean;
+}
+
 export interface CommitMessageEntry {
   short: string;
   subject: string;

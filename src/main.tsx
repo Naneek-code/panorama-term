@@ -8,6 +8,9 @@ import { initSettings } from '~/adapter/settings/settings.client';
 import NotificationOverlay from '~/components/commons/Notifications';
 import { WorkspaceProvider } from '~/usecase/context/WorkspaceContext';
 
+import '@fontsource/jetbrains-mono/400.css';
+import '@fontsource/jetbrains-mono/400-italic.css';
+import '@fontsource/jetbrains-mono/700.css';
 import '~/styles/global.scss';
 
 const root = () => createRoot(document.getElementById('root')!);

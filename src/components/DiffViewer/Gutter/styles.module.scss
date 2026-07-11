@@ -1,0 +1,52 @@
+.gutter {
+  position: relative;
+  flex: none;
+  min-width: 48px;
+  overflow: hidden;
+  color: var(--text-dim);
+  font-size: 11px;
+  font-family: var(--font-mono);
+  font-variant-numeric: tabular-nums;
+  background: var(--surface-2);
+  user-select: none;
+
+  &[data-side='orig'] {
+    border-left: 1px solid var(--border-1);
+    text-align: right;
+
+    .row {
+      padding: 0 2px 0 12px;
+    }
+  }
+
+  &[data-side='mod'] {
+    border-right: 1px solid var(--border-1);
+    text-align: left;
+
+    .row {
+      padding: 0 12px 0 2px;
+    }
+  }
+}
+
+.row {
+  position: absolute;
+  right: 0;
+  left: 0;
+  white-space: nowrap;
+}
+
+.insert {
+  color: #c9e9ce;
+  background: rgba(42, 124, 64, 0.28);
+}
+
+.delete {
+  color: #f0c8c6;
+  background: rgba(168, 49, 47, 0.26);
+}
+
+.modify {
+  color: #c9d9ec;
+  background: rgba(33, 66, 131, 0.3);
+}
