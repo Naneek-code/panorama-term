@@ -1,6 +1,7 @@
 import React from 'react';
-import { File, Folder, FolderOpen, ChevronRight } from 'lucide-react';
+import { ChevronRight } from 'lucide-react';
 
+import FileIcon from '~/components/commons/FileIcon';
 import { readDir, type DirEntry } from '~/adapter/fs/fs.client';
 
 import styles from './styles.module.scss';
@@ -53,15 +54,8 @@ const Node = ({ entry, depth, query, expanded, onOpen, onMenu }: NodeProps) => {
         ) : (
           <span className={styles.caret} />
         )}
-        {entry.dir ? (
-          open ? (
-            <FolderOpen size={13} strokeWidth={1.75} className={styles.folder} />
-          ) : (
-            <Folder size={13} strokeWidth={1.75} className={styles.folder} />
-          )
-        ) : (
-          <File size={13} strokeWidth={1.75} className={styles.file} />
-        )}
+        <FileIcon name={entry.name} dir={entry.dir} open={open} size={14} />
+
         <span className={styles.name}>{entry.name}</span>
       </div>
       {open &&

@@ -97,6 +97,36 @@ body {
     sans-serif;
 }
 
+input[type='checkbox'] {
+  appearance: none;
+  width: 13px;
+  height: 13px;
+  flex: none;
+  margin: 0;
+  cursor: pointer;
+  border: 1px solid var(--border-3);
+  border-radius: 3px;
+  background: var(--surface-1) center / 9px no-repeat;
+
+  &:hover {
+    border-color: var(--text-dim);
+  }
+
+  &:checked,
+  &:indeterminate {
+    border-color: var(--accent);
+    background-color: var(--accent);
+  }
+
+  &:checked {
+    background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 12 12'%3E%3Cpath fill='none' stroke='%23fff' stroke-width='2' stroke-linecap='round' stroke-linejoin='round' d='M2.5 6.5l2.5 2.5 4.5-5'/%3E%3C/svg%3E");
+  }
+
+  &:indeterminate {
+    background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 12 12'%3E%3Cpath stroke='%23fff' stroke-width='2' stroke-linecap='round' d='M3 6h6'/%3E%3C/svg%3E");
+  }
+}
+
 .xterm-viewport {
   scrollbar-width: none;
 
