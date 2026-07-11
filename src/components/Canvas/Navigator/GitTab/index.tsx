@@ -9,7 +9,8 @@ import {
   ChevronDown,
   CircleCheck,
   ChevronRight,
-  ListCollapse
+  ListCollapse,
+  LoaderCircle
 } from 'lucide-react';
 
 import type { ContextMenuEntry } from '~/components/commons/ContextMenu';
@@ -125,24 +126,58 @@ const GitTab = ({ root, query }: GitTabProps) => {
   const [amendMenu, setAmendMenu] = React.useState<CommitMessageEntry[] | null>(null);
   const [viewMenu, setViewMenu] = React.useState<{ x: number; y: number } | null>(null);
   const lastCommit = React.useRef<CommitMessageEntry | null>(null);
+  const known = React.useRef<Set<string>>(new Set());
 
-  const load = React.useCallback(() => {
-    setRefreshing(true);
-    Promise.all([gitStatus(root), gitUnpushedCommits(root).catch(() => [])])
-      .then(([snap, ahead]) => {
-        setStatus(snap);
-        setUnpushed(ahead.length);
-        setError(null);
-        setSelected(new Set(snap.changes.map((f) => f.path)));
-      })
-      .catch((err: unknown) => setError(message(err)))
-      .finally(() => setRefreshing(false));
-    gitLogMessages(root, 1)
-      .then((entries) => (lastCommit.current = entries[0] ?? null))
-      .catch(() => (lastCommit.current = null));
-  }, [root]);
+  const applySelection = React.useCallback((snap: StatusSnapshot) => {
+    const changed = new Set(snap.changes.map((f) => f.path));
+    const all = [...snap.changes, ...snap.unversioned].map((f) => f.path);
+    setSelected((prev) => {
+      const next = new Set<string>();
+      for (const path of all) {
+        if (known.current.has(path)) {
+          if (prev.has(path)) next.add(path);
+        } else if (changed.has(path)) {
+          next.add(path);
+        }
+      }
+      return next;
+    });
+    known.current = new Set(all);
+  }, []);
+
+  const fetchStatus = React.useCallback(
+    (quiet: boolean) => {
+      if (!quiet) setRefreshing(true);
+      Promise.all([gitStatus(root), gitUnpushedCommits(root).catch(() => [])])
+        .then(([snap, ahead]) => {
+          setStatus(snap);
+          setUnpushed(ahead.length);
+          setError(null);
+          applySelection(snap);
+        })
+        .catch((err: unknown) => {
+          if (!quiet) setError(message(err));
+        })
+        .finally(() => {
+          if (!quiet) setRefreshing(false);
+        });
+      gitLogMessages(root, 1)
+        .then((entries) => (lastCommit.current = entries[0] ?? null))
+        .catch(() => (lastCommit.current = null));
+    },
+    [root, applySelection]
+  );
+
+  const load = React.useCallback(() => fetchStatus(false), [fetchStatus]);
 
   React.useEffect(load, [load]);
+
+  React.useEffect(() => {
+    const timer = window.setInterval(() => {
+      if (!busy && !pushing) fetchStatus(true);
+    }, 5000);
+    return () => window.clearInterval(timer);
+  }, [fetchStatus, busy, pushing]);
 
   const needle = query.trim().toLowerCase();
   const matches = (file: FileChange): boolean => !needle || file.path.toLowerCase().includes(needle);
@@ -391,7 +426,11 @@ const GitTab = ({ root, query }: GitTabProps) => {
       </div>
 
       <div className={styles.list}>
-        {!status && !error && <div className={styles.hint}>Loading...</div>}
+        {!status && !error && (
+          <div className={styles.notice}>
+            <LoaderCircle size={16} strokeWidth={2} className={styles.spinning} />
+          </div>
+        )}
         {blocked && <div className={styles.notice}>{friendly}</div>}
         {clean && (
           <div className={styles.notice}>
