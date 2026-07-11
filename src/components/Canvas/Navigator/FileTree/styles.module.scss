@@ -1,0 +1,47 @@
+.row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  height: 26px;
+  padding-right: 8px;
+  cursor: pointer;
+  border-radius: 5px;
+  color: var(--text-1);
+  font-size: 12.5px;
+
+  &:hover {
+    color: var(--text-strong);
+    background: var(--hover-2);
+  }
+
+  &[data-dim='true'] {
+    opacity: 0.45;
+  }
+}
+
+.caret {
+  width: 12px;
+  flex: none;
+  color: var(--text-muted);
+  transition: transform 0.12s ease;
+
+  &[data-open='true'] {
+    transform: rotate(90deg);
+  }
+}
+
+.folder {
+  flex: none;
+  color: #7fa6d4;
+}
+
+.file {
+  flex: none;
+  color: var(--text-muted);
+}
+
+.name {
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}

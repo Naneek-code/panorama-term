@@ -1,3 +1,5 @@
+import type { Tile } from '~/domain/interfaces/canvas.interface';
+
 const ALNUM = /[\p{L}\p{N}]/u;
 const STAR_PREFIX = /^[\s✳✻✽✶✢❋✱✲✧✦∗*]+/u;
 
@@ -17,4 +19,11 @@ export const stripSpinner = (title: string): string => {
   }
   if (rest.length <= 3 && !ALNUM.test(rest)) return '';
   return rest.trim();
+};
+
+const FALLBACK: Record<string, string> = { term: 'Terminal', note: 'Note' };
+
+export const tileLabel = (tile: Tile): string => {
+  const osc = tile.oscTitle ? stripSpinner(stripStarPrefix(tile.oscTitle).trim()) : '';
+  return tile.userTitle || osc || tile.autoTitle || FALLBACK[tile.type] || tile.type;
 };

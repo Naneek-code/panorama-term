@@ -66,6 +66,8 @@ export const useCanvas = ({ seed, onPersist }: UseCanvasArgs) => {
   viewRef.current = view;
   const tilesRef = React.useRef(tiles);
   tilesRef.current = tiles;
+  const framesRef = React.useRef(frames);
+  framesRef.current = frames;
 
   const snapRaf = React.useRef(0);
   const focusRaf = React.useRef(0);
@@ -457,21 +459,13 @@ export const useCanvas = ({ seed, onPersist }: UseCanvasArgs) => {
 
   const panTo = React.useCallback((x: number, y: number) => setView((v) => ({ ...v, x, y })), []);
 
-  const focusTile = React.useCallback(function run(id: string, zoomToMax = false) {
+  const glide = React.useCallback((cx: number, cy: number, tk: number) => {
     const bg = bgRef.current;
-    const tile = tilesRef.current.find((t) => t.id === id);
-    if (!bg || !tile) return;
+    if (!bg) return;
     cancelAnimationFrame(focusRaf.current);
     cancelAnimationFrame(snapRaf.current);
     clearTimeout(snapTimer.current);
-    if (document.hidden || !bg.clientWidth || !bg.clientHeight) {
-      focusRaf.current = requestAnimationFrame(() => run(id, zoomToMax));
-      return;
-    }
     const start = viewRef.current;
-    const tk = zoomToMax ? maxZoom() : start.k;
-    const cx = tile.x + tile.width / 2;
-    const cy = tile.y + tile.height / 2;
     const sx = (bg.clientWidth / 2 - start.x) / start.k;
     const sy = (bg.clientHeight / 2 - start.y) / start.k;
     const t0 = performance.now();
@@ -489,6 +483,40 @@ export const useCanvas = ({ seed, onPersist }: UseCanvasArgs) => {
     focusRaf.current = requestAnimationFrame(step);
   }, []);
 
+  const pending = (): boolean => {
+    const bg = bgRef.current;
+    return document.hidden || !bg?.clientWidth || !bg.clientHeight;
+  };
+
+  const focusTile = React.useCallback(
+    function run(id: string, zoomToMax = false) {
+      const tile = tilesRef.current.find((t) => t.id === id);
+      if (!tile) return;
+      if (pending()) {
+        focusRaf.current = requestAnimationFrame(() => run(id, zoomToMax));
+        return;
+      }
+      const tk = zoomToMax ? maxZoom() : viewRef.current.k;
+      glide(tile.x + tile.width / 2, tile.y + tile.height / 2, tk);
+    },
+    [glide]
+  );
+
+  const focusFrame = React.useCallback(
+    function run(id: string) {
+      const bg = bgRef.current;
+      const frame = framesRef.current.find((f) => f.id === id);
+      if (!frame) return;
+      if (!bg || pending()) {
+        focusRaf.current = requestAnimationFrame(() => run(id));
+        return;
+      }
+      const fit = Math.min(bg.clientWidth / frame.width, bg.clientHeight / frame.height) * 0.9;
+      glide(frame.x + frame.width / 2, frame.y + frame.height / 2, Math.min(Math.max(fit, ZOOM_MIN), maxZoom()));
+    },
+    [glide]
+  );
+
   return {
     view,
     tiles,
@@ -498,6 +526,7 @@ export const useCanvas = ({ seed, onPersist }: UseCanvasArgs) => {
     endPan,
     addNote,
     focusTile,
+    focusFrame,
     gridRef,
     onWheel,
     addTile,

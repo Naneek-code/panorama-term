@@ -289,6 +289,36 @@ fn reveal_path(path: String) -> Result<(), String> {
     return spawn("xdg-open", &[&path]);
 }
 
+#[derive(serde::Serialize)]
+struct DirEntry {
+    name: String,
+    path: String,
+    dir: bool,
+}
+
+#[tauri::command]
+fn read_dir(path: String) -> Result<Vec<DirEntry>, String> {
+    let mut out: Vec<DirEntry> = std::fs::read_dir(&path)
+        .map_err(|e| e.to_string())?
+        .filter_map(|entry| entry.ok())
+        .filter_map(|entry| {
+            let name = entry.file_name().to_string_lossy().into_owned();
+            if name.starts_with('.') || name == "node_modules" {
+                return None;
+            }
+            let dir = entry.file_type().ok()?.is_dir();
+            let path = entry.path().to_string_lossy().into_owned();
+            Some(DirEntry { name, path, dir })
+        })
+        .collect();
+    out.sort_by(|a, b| {
+        b.dir
+            .cmp(&a.dir)
+            .then_with(|| a.name.to_lowercase().cmp(&b.name.to_lowercase()))
+    });
+    Ok(out)
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     tauri::Builder::default()
@@ -309,6 +339,7 @@ pub fn run() {
             focus_main,
             set_pending_count,
             reveal_path,
+            read_dir,
             open_url,
             store::store_read,
             store::store_write,

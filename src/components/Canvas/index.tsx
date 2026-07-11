@@ -9,6 +9,7 @@ import Frame from '~/components/Canvas/Frame';
 import FrameBar from '~/components/Canvas/FrameBar';
 import Minimap from '~/components/Canvas/Minimap';
 import TileFrame from '~/components/Canvas/TileFrame';
+import Navigator from '~/components/Canvas/Navigator';
 import NoteToolbar from '~/components/Canvas/NoteToolbar';
 import ContextMenu from '~/components/commons/ContextMenu';
 import { useCanvas } from '~/usecase/hooks/useCanvas';
@@ -44,6 +45,7 @@ const Canvas = () => {
     gridRef,
     duplicateTile,
     focusTile,
+    focusFrame,
     onWheel,
     moveTile,
     snapTile,
@@ -71,6 +73,7 @@ const Canvas = () => {
   const [size, setSize] = React.useState({ w: window.innerWidth, h: window.innerHeight });
   const [fsId, setFsId] = React.useState<string | null>(null);
   const [fsExit, setFsExit] = React.useState(false);
+  const [navOpen, setNavOpen] = React.useState(false);
   const fsIdRef = React.useRef<string | null>(fsId);
   fsIdRef.current = fsId;
   const activeTileRef = React.useRef<string | null>(activeTile);
@@ -132,6 +135,10 @@ const Canvas = () => {
       }
       if (cmd === 'view.resetZoom') {
         resetZoom();
+        return true;
+      }
+      if (cmd === 'view.navigator') {
+        setNavOpen((v) => !v);
         return true;
       }
       return false;
@@ -303,6 +310,16 @@ const Canvas = () => {
     [activateAndClear, focusTile]
   );
 
+  const navFocus = React.useCallback(
+    (id: string, zoomToMax = false) => {
+      activateAndClear(id);
+      focusTile(id, zoomToMax);
+    },
+    [activateAndClear, focusTile]
+  );
+
+  const hideNav = () => setNavOpen(false);
+
   useNotifyBridge({ tiles, activeTile, onOpen: openNotified, onAlert: addAlert, onClear: clearAlert });
 
   React.useEffect(() => {
@@ -384,6 +401,20 @@ const Canvas = () => {
         </div>
         {!fsId && <Minimap view={view} tiles={tiles} viewportRef={bgRef} onPan={panTo} />}
       </div>
+      {!fsId && navOpen && (
+        <Navigator
+          tiles={tiles}
+          frames={frames}
+          alerts={alerts}
+          activeTile={activeTile}
+          onNewTile={addTile}
+          onFocusTile={navFocus}
+          onFocusFrame={focusFrame}
+          onRenameTile={setTileTitle}
+          onCloseTile={closeTile}
+          onClose={hideNav}
+        />
+      )}
       {!fsId && activeNote && activeNoteEditor && (
         <NoteToolbar
           editor={activeNoteEditor}

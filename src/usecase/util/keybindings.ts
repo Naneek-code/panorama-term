@@ -1,6 +1,12 @@
 import { getSetting, setSetting } from '~/adapter/settings/settings.client';
 
-export type CommandId = 'tile.fullscreen' | 'tile.new' | 'note.new' | 'tile.close' | 'view.resetZoom';
+export type CommandId =
+  | 'tile.fullscreen'
+  | 'tile.new'
+  | 'note.new'
+  | 'tile.close'
+  | 'view.resetZoom'
+  | 'view.navigator';
 
 interface Command {
   id: CommandId;
@@ -18,7 +24,8 @@ export const KEYBINDINGS: Command[] = [
   { id: 'note.new', label: 'New note', group: 'Canvas', defaultCombo: 'mod+shift+n' },
   { id: 'tile.close', label: 'Close active tile', group: 'Canvas', defaultCombo: 'mod+w' },
   { id: 'tile.fullscreen', label: 'Toggle fullscreen', group: 'Canvas', defaultCombo: 'mod+shift+f' },
-  { id: 'view.resetZoom', label: 'Reset zoom', group: 'View', defaultCombo: 'mod+0' }
+  { id: 'view.resetZoom', label: 'Reset zoom', group: 'View', defaultCombo: 'mod+0' },
+  { id: 'view.navigator', label: 'Toggle navigator', group: 'View', defaultCombo: 'mod+b' }
 ];
 
 const overrides = (): Record<string, string> => getSetting<Record<string, string>>(BINDINGS_KEY, {});
