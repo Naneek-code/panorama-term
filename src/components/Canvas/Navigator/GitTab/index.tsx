@@ -127,6 +127,18 @@ const GitTab = ({ root, query }: GitTabProps) => {
   const [viewMenu, setViewMenu] = React.useState<{ x: number; y: number } | null>(null);
   const lastCommit = React.useRef<CommitMessageEntry | null>(null);
   const known = React.useRef<Set<string>>(new Set());
+  const commitRef = React.useRef<HTMLDivElement>(null);
+
+  React.useEffect(() => {
+    if (!history && !amendMenu) return;
+    const outside = (e: PointerEvent) => {
+      if (commitRef.current?.contains(e.target as Node)) return;
+      setHistory(null);
+      setAmendMenu(null);
+    };
+    document.addEventListener('pointerdown', outside, true);
+    return () => document.removeEventListener('pointerdown', outside, true);
+  }, [history, amendMenu]);
 
   const applySelection = React.useCallback((snap: StatusSnapshot) => {
     const changed = new Set(snap.changes.map((f) => f.path));
@@ -280,6 +292,7 @@ const GitTab = ({ root, query }: GitTabProps) => {
       setHistory(null);
       return;
     }
+    setAmendMenu(null);
     void gitLogMessages(root, 20)
       .then(setHistory)
       .catch(() => setHistory([]));
@@ -295,6 +308,7 @@ const GitTab = ({ root, query }: GitTabProps) => {
       setAmendMenu(null);
       return;
     }
+    setHistory(null);
     void gitUnpushedCommits(root)
       .then(setAmendMenu)
       .catch(() => setAmendMenu([]));
@@ -442,7 +456,7 @@ const GitTab = ({ root, query }: GitTabProps) => {
         {status && section('unversioned', 'Unversioned', status.unversioned)}
       </div>
 
-      <div className={styles.commit}>
+      <div className={styles.commit} ref={commitRef}>
         <div className={styles.commitBar}>
           <label className={styles.amend}>
             <input type="checkbox" checked={amend} onChange={toggleAmend} disabled={blocked} />
