@@ -44,7 +44,7 @@ const Node = ({ entry, depth, query, expanded, onOpen, onMenu }: NodeProps) => {
     <>
       <div
         className={styles.row}
-        style={{ paddingLeft: 8 + depth * 12 }}
+        style={{ paddingLeft: 8 + depth * 14 }}
         onClick={toggle}
         onContextMenu={menu}
         data-dim={hidden || undefined}

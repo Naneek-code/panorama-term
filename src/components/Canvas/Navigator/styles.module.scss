@@ -16,6 +16,41 @@
   animation: slide-in 0.14s ease-out both;
 }
 
+.resizer {
+  position: absolute;
+  top: 0;
+  right: -4px;
+  bottom: 0;
+  z-index: 5;
+  width: 8px;
+  cursor: ew-resize;
+  touch-action: none;
+
+  &::before {
+    content: '';
+    position: absolute;
+    top: 8px;
+    bottom: 8px;
+    left: 50%;
+    width: 2px;
+    transform: translateX(-50%);
+    border-radius: 2px;
+    background: linear-gradient(to bottom, transparent, var(--accent) 18%, var(--accent) 82%, transparent);
+    opacity: 0;
+    transition: opacity 0.15s ease;
+  }
+
+  &:hover::before {
+    opacity: 0.45;
+    transition-delay: 0.1s;
+  }
+
+  &:active::before {
+    opacity: 0.9;
+    transition-delay: 0s;
+  }
+}
+
 @keyframes slide-in {
   from {
     opacity: 0;
@@ -137,8 +172,9 @@
 .group {
   display: flex;
   align-items: center;
-  gap: 5px;
-  height: 24px;
+  gap: 4px;
+  height: 22px;
+  line-height: 1;
   padding: 0 6px 0 2px;
   cursor: pointer;
   border-radius: 5px;
@@ -200,16 +236,17 @@
 .tile {
   display: flex;
   align-items: center;
-  gap: 6px;
-  height: 26px;
+  gap: 4px;
+  height: 22px;
   padding: 0 8px;
   cursor: pointer;
+  line-height: 1;
   border-radius: 5px;
   color: var(--text-1);
-  font-size: 12.5px;
+  font-size: 13px;
 
   &[data-nested='true'] {
-    padding-left: 20px;
+    padding-left: 22px;
   }
 
   &:hover {

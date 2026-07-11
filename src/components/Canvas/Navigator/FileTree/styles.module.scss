@@ -1,13 +1,18 @@
 .row {
   display: flex;
   align-items: center;
-  gap: 6px;
-  height: 26px;
+  gap: 4px;
+  height: 22px;
   padding-right: 8px;
   cursor: pointer;
+  line-height: 1;
   border-radius: 5px;
   color: var(--text-1);
-  font-size: 12.5px;
+  font-size: 13px;
+
+  > svg {
+    flex: none;
+  }
 
   &:hover {
     color: var(--text-strong);

@@ -64,6 +64,15 @@ interface NavigatorProps {
   onClose: () => void;
 }
 
+const WIDTH_KEY = 'panorama:navWidth';
+const MIN_WIDTH = 200;
+const MAX_WIDTH = 560;
+
+const savedWidth = (): number => {
+  const raw = Number(localStorage.getItem(WIDTH_KEY));
+  return raw >= MIN_WIDTH && raw <= MAX_WIDTH ? raw : 248;
+};
+
 const Navigator = ({
   tiles,
   frames,
@@ -77,6 +86,7 @@ const Navigator = ({
   onClose
 }: NavigatorProps) => {
   const [tab, setTab] = React.useState<'files' | 'tiles' | 'git'>('files');
+  const [width, setWidth] = React.useState(savedWidth);
   const [query, setQuery] = React.useState('');
   const [collapsed, setCollapsed] = React.useState<Set<string>>(() => new Set());
   const [renaming, setRenaming] = React.useState<string | null>(null);
@@ -136,6 +146,27 @@ const Navigator = ({
   };
 
   const closeMenu = () => setMenu(null);
+
+  const startResize = (e: React.PointerEvent<HTMLDivElement>) => {
+    e.preventDefault();
+    const el = e.currentTarget;
+    const startX = e.clientX;
+    const startW = width;
+    let next = startW;
+    el.setPointerCapture(e.pointerId);
+
+    const move = (ev: PointerEvent) => {
+      next = Math.min(MAX_WIDTH, Math.max(MIN_WIDTH, startW + ev.clientX - startX));
+      setWidth(next);
+    };
+    const up = () => {
+      el.removeEventListener('pointermove', move);
+      el.removeEventListener('pointerup', up);
+      localStorage.setItem(WIDTH_KEY, String(next));
+    };
+    el.addEventListener('pointermove', move);
+    el.addEventListener('pointerup', up);
+  };
 
   const menuItems = () => {
     if (menu?.tile) {
@@ -202,7 +233,7 @@ const Navigator = ({
   };
 
   return (
-    <div className={styles.panel}>
+    <div className={styles.panel} style={{ width }}>
       <div className={styles.header}>
         <button className={styles.action} onClick={newTile} aria-label="New terminal">
           <Plus size={14} strokeWidth={2} />
@@ -280,6 +311,8 @@ const Navigator = ({
             <div className={styles.empty}>Focus a terminal to see its folder</div>
           ))}
       </div>
+
+      <div className={styles.resizer} onPointerDown={startResize} />
 
       {menu && <ContextMenu x={menu.x} y={menu.y} onClose={closeMenu} items={menuItems()} />}
     </div>
