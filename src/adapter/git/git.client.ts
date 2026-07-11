@@ -1,6 +1,11 @@
 import { invoke } from '@tauri-apps/api/core';
 
-import type { CommitInfo, BranchSnapshot } from '~/domain/interfaces/git.interface';
+import type {
+  CommitInfo,
+  BranchSnapshot,
+  StatusSnapshot,
+  CommitMessageEntry
+} from '~/domain/interfaces/git.interface';
 
 export const gitBranches = (path: string): Promise<BranchSnapshot> =>
   invoke<BranchSnapshot>('git_branches', { path });
@@ -49,3 +54,14 @@ export const gitCompareWithCurrent = (path: string, branch: string): Promise<Com
 
 export const gitToggleBranchFavorite = (path: string, fullName: string): Promise<BranchSnapshot> =>
   invoke<BranchSnapshot>('git_toggle_branch_favorite', { path, fullName });
+
+export const gitStatus = (path: string): Promise<StatusSnapshot> => invoke<StatusSnapshot>('git_status', { path });
+
+export const gitCommit = (path: string, files: string[], message: string, amend: boolean): Promise<void> =>
+  invoke<void>('git_commit', { path, files, message, amend });
+
+export const gitLogMessages = (path: string, limit = 20): Promise<CommitMessageEntry[]> =>
+  invoke<CommitMessageEntry[]>('git_log_messages', { path, limit });
+
+export const gitUnpushedCommits = (path: string): Promise<CommitMessageEntry[]> =>
+  invoke<CommitMessageEntry[]>('git_unpushed_commits', { path });

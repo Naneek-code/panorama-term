@@ -10,6 +10,7 @@ import {
   Trash2,
   Pencil,
   Network,
+  GitBranch,
   Crosshair,
   FolderTree,
   StickyNote,
@@ -24,6 +25,7 @@ import type { Tile, Frame } from '~/domain/interfaces/canvas.interface';
 import type { TileType } from '~/domain/interfaces/workspace.interface';
 import type { DirEntry } from '~/adapter/fs/fs.client';
 import type { NotifyKind } from '~/components/commons/Notifications/bridge';
+import GitTab from '~/components/Canvas/Navigator/GitTab';
 import FileTree from '~/components/Canvas/Navigator/FileTree';
 import ContextMenu from '~/components/commons/ContextMenu';
 import { tileLabel } from '~/usecase/util/title';
@@ -74,7 +76,7 @@ const Navigator = ({
   onCloseTile,
   onClose
 }: NavigatorProps) => {
-  const [tab, setTab] = React.useState<'files' | 'tiles'>('files');
+  const [tab, setTab] = React.useState<'files' | 'tiles' | 'git'>('files');
   const [query, setQuery] = React.useState('');
   const [collapsed, setCollapsed] = React.useState<Set<string>>(() => new Set());
   const [renaming, setRenaming] = React.useState<string | null>(null);
@@ -97,6 +99,7 @@ const Navigator = ({
 
   const showTiles = () => setTab('tiles');
   const showFiles = () => setTab('files');
+  const showGit = () => setTab('git');
 
   const toggleFrame = (id: string) => {
     setCollapsed((prev) => {
@@ -218,6 +221,10 @@ const Navigator = ({
           <Layers size={12} strokeWidth={2} />
           Tiles
         </button>
+        <button className={styles.tab} onClick={showGit} data-active={tab === 'git' || undefined}>
+          <GitBranch size={12} strokeWidth={2} />
+          Git
+        </button>
       </div>
 
       <div className={styles.filter}>
@@ -225,7 +232,14 @@ const Navigator = ({
         <input value={query} onChange={onQuery} placeholder="Filter" />
       </div>
 
-      <div className={styles.body}>
+      {tab === 'git' &&
+        (root ? (
+          <GitTab key={root} root={root} query={needle} />
+        ) : (
+          <div className={styles.empty}>Focus a terminal to see its repo</div>
+        ))}
+
+      <div className={styles.body} style={{ display: tab === 'git' ? 'none' : undefined }}>
         {tab === 'tiles' && (
           <>
             {frames.map((frame) => {

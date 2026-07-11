@@ -28,6 +28,28 @@ export interface CommitInfo {
   date: string;
 }
 
+export interface FileChange {
+  path: string;
+  name: string;
+  dir: string;
+  status_index: string;
+  status_worktree: string;
+  is_untracked: boolean;
+  rename_from: string | null;
+}
+
+export interface StatusSnapshot {
+  changes: FileChange[];
+  unversioned: FileChange[];
+}
+
+export interface CommitMessageEntry {
+  short: string;
+  subject: string;
+  body: string;
+  date: string;
+}
+
 export type BranchKind = 'local' | 'remote';
 
 export interface BranchLeaf {

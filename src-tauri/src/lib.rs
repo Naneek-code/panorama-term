@@ -358,7 +358,11 @@ pub fn run() {
             git::git_push_current,
             git::git_set_upstream,
             git::git_compare_with_current,
-            git::git_toggle_branch_favorite
+            git::git_toggle_branch_favorite,
+            git::git_status,
+            git::git_commit,
+            git::git_log_messages,
+            git::git_unpushed_commits
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

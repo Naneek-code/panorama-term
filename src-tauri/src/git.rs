@@ -39,6 +39,31 @@ pub struct CommitInfo {
     date: String,
 }
 
+#[derive(Serialize)]
+pub struct FileChange {
+    path: String,
+    name: String,
+    dir: String,
+    status_index: String,
+    status_worktree: String,
+    is_untracked: bool,
+    rename_from: Option<String>,
+}
+
+#[derive(Serialize)]
+pub struct StatusSnapshot {
+    changes: Vec<FileChange>,
+    unversioned: Vec<FileChange>,
+}
+
+#[derive(Serialize)]
+pub struct CommitMessageEntry {
+    short: String,
+    subject: String,
+    body: String,
+    date: String,
+}
+
 fn run_git(repo: &str, args: &[&str]) -> Result<String, String> {
     let out = Command::new("git")
         .arg("-C")
@@ -241,6 +266,227 @@ fn snapshot(repo: &str) -> Result<BranchSnapshot, String> {
         remotes,
         recent,
     })
+}
+
+fn natural_cmp(a: &str, b: &str) -> std::cmp::Ordering {
+    use std::cmp::Ordering;
+    let a_bytes = a.as_bytes();
+    let b_bytes = b.as_bytes();
+    let (mut ai, mut bi) = (0usize, 0usize);
+    while ai < a_bytes.len() && bi < b_bytes.len() {
+        let ac = a_bytes[ai];
+        let bc = b_bytes[bi];
+        if ac.is_ascii_digit() && bc.is_ascii_digit() {
+            let a_start = ai;
+            while ai < a_bytes.len() && a_bytes[ai].is_ascii_digit() {
+                ai += 1;
+            }
+            let b_start = bi;
+            while bi < b_bytes.len() && b_bytes[bi].is_ascii_digit() {
+                bi += 1;
+            }
+            let a_num = &a_bytes[a_start..ai];
+            let b_num = &b_bytes[b_start..bi];
+            let a_trim = a_num
+                .iter()
+                .position(|&c| c != b'0')
+                .map_or(&a_num[a_num.len()..], |i| &a_num[i..]);
+            let b_trim = b_num
+                .iter()
+                .position(|&c| c != b'0')
+                .map_or(&b_num[b_num.len()..], |i| &b_num[i..]);
+            match a_trim.len().cmp(&b_trim.len()).then_with(|| a_trim.cmp(b_trim)) {
+                Ordering::Equal => {}
+                other => return other,
+            }
+        } else {
+            match ac.to_ascii_lowercase().cmp(&bc.to_ascii_lowercase()) {
+                Ordering::Equal => {
+                    ai += 1;
+                    bi += 1;
+                }
+                other => return other,
+            }
+        }
+    }
+    a_bytes.len().cmp(&b_bytes.len())
+}
+
+fn split_name_dir(p: &str) -> (String, String) {
+    match p.rfind('/') {
+        Some(idx) => (p[idx + 1..].to_string(), p[..idx].to_string()),
+        None => (p.to_string(), String::new()),
+    }
+}
+
+fn basename(p: &str) -> String {
+    let trimmed = p.trim_end_matches(['\\', '/']);
+    if trimmed.is_empty() {
+        return p.to_string();
+    }
+    trimmed
+        .rsplit(|c: char| c == '\\' || c == '/')
+        .next()
+        .map(|s| s.to_string())
+        .unwrap_or_else(|| p.to_string())
+}
+
+fn parse_porcelain_z(out: &[u8]) -> Vec<FileChange> {
+    let mut entries = Vec::new();
+    let mut i = 0;
+    while i + 3 <= out.len() {
+        let x = out[i] as char;
+        let y = out[i + 1] as char;
+        let start = i + 3;
+        let mut j = start;
+        while j < out.len() && out[j] != 0 {
+            j += 1;
+        }
+        if j >= out.len() {
+            break;
+        }
+        let path = String::from_utf8_lossy(&out[start..j]).into_owned();
+        i = j + 1;
+
+        let mut rename_from = None;
+        if x == 'R' || x == 'C' {
+            let r_start = i;
+            let mut k = r_start;
+            while k < out.len() && out[k] != 0 {
+                k += 1;
+            }
+            rename_from = Some(String::from_utf8_lossy(&out[r_start..k]).into_owned());
+            i = k + 1;
+        }
+
+        let (name, dir) = split_name_dir(&path);
+        let is_untracked = x == '?' && y == '?';
+        entries.push(FileChange {
+            path,
+            name,
+            dir,
+            status_index: x.to_string(),
+            status_worktree: y.to_string(),
+            is_untracked,
+            rename_from,
+        });
+    }
+    entries
+}
+
+fn parse_commit_entries(raw: &str) -> Vec<CommitMessageEntry> {
+    let mut entries = Vec::new();
+    for chunk in raw.split('\x1e') {
+        let chunk = chunk.trim_start_matches('\n');
+        if chunk.is_empty() {
+            continue;
+        }
+        let parts: Vec<&str> = chunk.splitn(3, '\x1f').collect();
+        if parts.len() < 3 {
+            continue;
+        }
+        let short = parts[0].trim().to_string();
+        let date = parts[1].trim().to_string();
+        let body = parts[2].trim_end().to_string();
+        let subject = body.lines().next().unwrap_or("").to_string();
+        entries.push(CommitMessageEntry {
+            short,
+            subject,
+            body,
+            date,
+        });
+    }
+    entries
+}
+
+fn repo_root(path: &str) -> Result<String, String> {
+    run_git(path, &["rev-parse", "--show-toplevel"]).map(|out| out.trim().to_string())
+}
+
+#[tauri::command]
+pub fn git_status(path: String) -> Result<StatusSnapshot, String> {
+    let path = repo_root(&path)?;
+    let out = Command::new("git")
+        .arg("-C")
+        .arg(&path)
+        .args(["status", "--porcelain=v1", "-uall", "-z"])
+        .output()
+        .map_err(|e| format!("git: {}", e))?;
+    if !out.status.success() {
+        return Err(String::from_utf8_lossy(&out.stderr).trim().to_string());
+    }
+
+    let repo_name = basename(&path);
+    let mut changes = Vec::new();
+    let mut unversioned = Vec::new();
+    for mut entry in parse_porcelain_z(&out.stdout) {
+        if entry.dir.is_empty() {
+            entry.dir = repo_name.clone();
+        }
+        if entry.is_untracked {
+            unversioned.push(entry);
+        } else {
+            changes.push(entry);
+        }
+    }
+
+    let by_name =
+        |a: &FileChange, b: &FileChange| natural_cmp(&a.name, &b.name).then_with(|| natural_cmp(&a.path, &b.path));
+    changes.sort_by(by_name);
+    unversioned.sort_by(by_name);
+
+    Ok(StatusSnapshot {
+        changes,
+        unversioned,
+    })
+}
+
+#[tauri::command]
+pub fn git_commit(path: String, files: Vec<String>, message: String, amend: bool) -> Result<(), String> {
+    if files.is_empty() && !amend {
+        return Err("No files selected".into());
+    }
+    if message.trim().is_empty() && !amend {
+        return Err("Commit message is empty".into());
+    }
+    let path = repo_root(&path)?;
+
+    if !files.is_empty() {
+        let mut cmd = Command::new("git");
+        cmd.arg("-C").arg(&path).arg("add").arg("--");
+        for f in &files {
+            cmd.arg(f);
+        }
+        let out = cmd.output().map_err(|e| format!("git: {}", e))?;
+        if !out.status.success() {
+            return Err(String::from_utf8_lossy(&out.stderr).trim().to_string());
+        }
+    }
+
+    let mut args = vec!["commit", "-m", &message];
+    if amend {
+        args.push("--amend");
+    }
+    run_git(&path, &args)?;
+    Ok(())
+}
+
+#[tauri::command]
+pub fn git_log_messages(path: String, limit: Option<u32>) -> Result<Vec<CommitMessageEntry>, String> {
+    let n = limit.unwrap_or(20).to_string();
+    let out = run_git(
+        &path,
+        &["log", "--format=%x1e%h%x1f%ad%x1f%B", "--date=short", "-n", &n],
+    )?;
+    Ok(parse_commit_entries(&out))
+}
+
+#[tauri::command]
+pub fn git_unpushed_commits(path: String) -> Result<Vec<CommitMessageEntry>, String> {
+    let fmt = "--format=%x1e%h%x1f%ad%x1f%B";
+    let out = run_git(&path, &["log", "@{u}..HEAD", fmt, "--date=short"])
+        .or_else(|_| run_git(&path, &["log", "-n", "10", fmt, "--date=short"]))?;
+    Ok(parse_commit_entries(&out))
 }
 
 #[tauri::command]
