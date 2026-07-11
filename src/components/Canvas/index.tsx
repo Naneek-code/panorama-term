@@ -234,6 +234,7 @@ const Canvas = () => {
   const setNoteColor = (id: string, color: string) => patchTile(id, { color });
   const setNoteTitle = (id: string, title: string) => patchTile(id, { userTitle: title });
   const setTileTitle = (id: string, title: string) => patchTile(id, { userTitle: title || undefined });
+  const togglePin = (id: string) => patchTile(id, { pinned: !tiles.find((t) => t.id === id)?.pinned });
 
   const copyTilePath = (id: string) => {
     const cwd = tiles.find((t) => t.id === id)?.cwd;
@@ -351,6 +352,7 @@ const Canvas = () => {
               onCopyPath={copyTilePath}
               onReveal={revealTilePath}
               onDuplicate={duplicateTile}
+              onTogglePin={togglePin}
               active={t.id === activeTile}
               alert={alerts.get(t.id) ?? null}
               visible={vis}

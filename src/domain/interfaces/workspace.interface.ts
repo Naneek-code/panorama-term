@@ -20,6 +20,7 @@ export interface Tile {
   ptySessionId?: string;
   color?: string;
   content?: string;
+  pinned?: boolean;
 }
 
 export interface Frame {

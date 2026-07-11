@@ -1,6 +1,6 @@
 import React from 'react';
 import type { Editor } from '@tiptap/react';
-import { X, Copy, Focus, Pencil, Trash2, Maximize, Minimize, RotateCw, CopyPlus, GitBranch, FolderOpen, ClipboardCopy } from 'lucide-react';
+import { X, Pin, PinOff, Copy, Focus, Pencil, Trash2, Maximize, Minimize, RotateCw, CopyPlus, GitBranch, FolderOpen, ClipboardCopy } from 'lucide-react';
 
 import type { Tile, View } from '~/domain/interfaces/canvas.interface';
 import type { ContextMenuEntry } from '~/components/commons/ContextMenu';
@@ -45,6 +45,7 @@ interface TileFrameProps {
   onCopyPath: (id: string) => void;
   onReveal: (id: string) => void;
   onDuplicate: (id: string) => void;
+  onTogglePin: (id: string) => void;
 }
 
 const HANDLES = ['n', 's', 'e', 'w', 'nw', 'ne', 'sw', 'se'];
@@ -56,7 +57,7 @@ const devicePx = (v: number): number => {
   return Math.round(v * dpr) / dpr;
 };
 
-const TileFrame = ({ tile, view, active, alert, visible, live, hidden, fullscreen, exiting, vpW, vpH, onMove, onSnap, onClose, onResize, onActivate, onFocusTile, onToggleFullscreen, onCwd, onOscTitle, onNoteChange, onNoteEditor, onNoteTitle, onCopyNote, onRename, onCopyPath, onReveal, onDuplicate }: TileFrameProps) => {
+const TileFrame = ({ tile, view, active, alert, visible, live, hidden, fullscreen, exiting, vpW, vpH, onMove, onSnap, onClose, onResize, onActivate, onFocusTile, onToggleFullscreen, onCwd, onOscTitle, onNoteChange, onNoteEditor, onNoteTitle, onCopyNote, onRename, onCopyPath, onReveal, onDuplicate, onTogglePin }: TileFrameProps) => {
   const k = view.k;
   const drag = React.useRef<{ sx: number; sy: number; ox: number; oy: number } | null>(null);
   const resize = React.useRef<{ x: number; y: number; dir: string } | null>(null);
@@ -70,6 +71,7 @@ const TileFrame = ({ tile, view, active, alert, visible, live, hidden, fullscree
     if (e.button !== 0 || fullscreen) return;
     e.stopPropagation();
     onActivate(tile.id);
+    if (tile.pinned) return;
     (e.target as Element).setPointerCapture(e.pointerId);
     drag.current = { sx: e.clientX, sy: e.clientY, ox: tile.x, oy: tile.y };
   };
@@ -154,6 +156,7 @@ const TileFrame = ({ tile, view, active, alert, visible, live, hidden, fullscree
     if (renaming) renameRef.current?.select();
   }, [renaming]);
 
+  const togglePin = () => onTogglePin(tile.id);
   const duplicate = () => onDuplicate(tile.id);
   const copyPath = () => onCopyPath(tile.id);
   const reveal = () => onReveal(tile.id);
@@ -161,6 +164,11 @@ const TileFrame = ({ tile, view, active, alert, visible, live, hidden, fullscree
   const menuItems: ContextMenuEntry[] = [
     { label: 'Rename', icon: <Pencil size={15} strokeWidth={1.75} />, onSelect: startRename },
     { label: 'Duplicate', icon: <CopyPlus size={15} strokeWidth={1.75} />, onSelect: duplicate },
+    {
+      label: tile.pinned ? 'Unpin' : 'Pin',
+      icon: tile.pinned ? <PinOff size={15} strokeWidth={1.75} /> : <Pin size={15} strokeWidth={1.75} />,
+      onSelect: togglePin
+    },
     'separator',
     { label: 'Reveal in explorer', icon: <FolderOpen size={15} strokeWidth={1.75} />, onSelect: reveal, disabled: !tile.cwd },
     { label: 'Copy path', icon: <ClipboardCopy size={15} strokeWidth={1.75} />, onSelect: copyPath, disabled: !tile.cwd },
@@ -195,7 +203,7 @@ const TileFrame = ({ tile, view, active, alert, visible, live, hidden, fullscree
     : { width: bodyW, height: bodyH, transform: `scale(${k})`, transformOrigin: 'top left' as const };
   const term = tile.type === 'term' && live;
   const anim = fullscreen ? (exiting ? styles.fsExit : styles.fsEnter) : null;
-  const cls = [styles.tile, note && styles.sticky, active && !fullscreen && styles.active, anim].filter(Boolean).join(' ');
+  const cls = [styles.tile, note && styles.sticky, tile.pinned && styles.pinnedTile, active && !fullscreen && styles.active, anim].filter(Boolean).join(' ');
   const gone = { display: hidden ? 'none' : undefined };
 
   return (
@@ -258,6 +266,15 @@ const TileFrame = ({ tile, view, active, alert, visible, live, hidden, fullscree
             {note && (
               <button className={styles.action} onClick={copyNote} aria-label="Copy note">
                 <Copy size={13} strokeWidth={2} />
+              </button>
+            )}
+            {!fullscreen && (
+              <button
+                className={tile.pinned ? `${styles.action} ${styles.pinned}` : styles.action}
+                onClick={togglePin}
+                aria-label={tile.pinned ? 'Unpin tile' : 'Pin tile'}
+              >
+                {tile.pinned ? <PinOff size={13} strokeWidth={2} /> : <Pin size={13} strokeWidth={2} />}
               </button>
             )}
             <button className={styles.action} onClick={toggleFullscreen} aria-label="Toggle fullscreen">
