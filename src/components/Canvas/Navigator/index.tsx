@@ -258,14 +258,16 @@ const Navigator = ({
         </button>
       </div>
 
-      <div className={styles.filter}>
-        <Search size={12} strokeWidth={2} />
-        <input value={query} onChange={onQuery} placeholder="Filter" />
-      </div>
+      {tab !== 'git' && (
+        <div className={styles.filter}>
+          <Search size={12} strokeWidth={2} />
+          <input value={query} onChange={onQuery} placeholder="Filter" />
+        </div>
+      )}
 
       {tab === 'git' &&
         (root ? (
-          <GitTab key={root} root={root} query={needle} />
+          <GitTab key={root} root={root} query="" />
         ) : (
           <div className={styles.empty}>Focus a terminal to see its repo</div>
         ))}
@@ -286,7 +288,7 @@ const Navigator = ({
               return (
                 <div key={frame.id}>
                   <div className={styles.group} onClick={toggle}>
-                    <ChevronRight size={11} strokeWidth={2.5} className={styles.caret} data-open={!shut || undefined} />
+                    <ChevronRight size={12} strokeWidth={2.5} className={styles.caret} data-open={!shut || undefined} />
                     <span className={styles.swatch} style={{ background: frame.color }} />
                     <span className={styles.name}>{frame.title}</span>
                     {alerted && <span className={styles.dot} />}

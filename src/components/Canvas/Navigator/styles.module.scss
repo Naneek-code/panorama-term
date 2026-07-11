@@ -175,7 +175,7 @@
   gap: 4px;
   height: 22px;
   line-height: 1;
-  padding: 0 6px 0 2px;
+  padding: 0 8px;
   cursor: pointer;
   border-radius: 5px;
   color: var(--text-dim);
@@ -192,6 +192,7 @@
 
 .caret {
   flex: none;
+  color: var(--text-muted);
   transition: transform 0.12s ease;
 
   &[data-open='true'] {
@@ -246,7 +247,7 @@
   font-size: 13px;
 
   &[data-nested='true'] {
-    padding-left: 22px;
+    padding-left: 24px;
   }
 
   &:hover {

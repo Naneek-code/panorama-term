@@ -285,7 +285,11 @@ const GitTab = ({ root, query }: GitTabProps) => {
       return (
         <div key={node.id}>
           <div className={styles.row} style={{ paddingLeft: pad }} onClick={open}>
-            {shut ? <ChevronRight size={12} strokeWidth={2.5} /> : <ChevronDown size={12} strokeWidth={2.5} />}
+            {shut ? (
+              <ChevronRight size={12} strokeWidth={2.5} className={styles.caret} />
+            ) : (
+              <ChevronDown size={12} strokeWidth={2.5} className={styles.caret} />
+            )}
             <TriCheckbox state={triState(paths)} onChange={check} />
             <FileIcon dir open={!shut} size={14} />
             <span className={styles.name}>{node.name}</span>
@@ -343,7 +347,11 @@ const GitTab = ({ root, query }: GitTabProps) => {
     return (
       <div>
         <div className={styles.sectionHead} onClick={open}>
-          {shut ? <ChevronRight size={12} strokeWidth={2.5} /> : <ChevronDown size={12} strokeWidth={2.5} />}
+          {shut ? (
+            <ChevronRight size={12} strokeWidth={2.5} className={styles.caret} />
+          ) : (
+            <ChevronDown size={12} strokeWidth={2.5} className={styles.caret} />
+          )}
           <TriCheckbox state={triState(paths)} onChange={check} />
           <span className={styles.sectionLabel}>{label}</span>
           <span className={styles.count}>{pluralize(files.length)}</span>

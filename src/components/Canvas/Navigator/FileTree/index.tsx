@@ -50,7 +50,7 @@ const Node = ({ entry, depth, query, expanded, onOpen, onMenu }: NodeProps) => {
         data-dim={hidden || undefined}
       >
         {entry.dir ? (
-          <ChevronRight size={11} strokeWidth={2.5} className={styles.caret} data-open={open || undefined} />
+          <ChevronRight size={12} strokeWidth={2.5} className={styles.caret} data-open={open || undefined} />
         ) : (
           <span className={styles.caret} />
         )}
