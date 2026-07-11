@@ -51,6 +51,34 @@
   }
 }
 
+.toggleZone {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  left: 100%;
+  width: 28px;
+
+  &:hover .toggle {
+    opacity: 0.9;
+  }
+}
+
+.toggle {
+  position: absolute;
+  top: 50%;
+  left: 4px;
+  width: 7px;
+  height: 44px;
+  padding: 0;
+  border: none;
+  cursor: pointer;
+  transform: translateY(-50%);
+  border-radius: 9999px;
+  background: var(--border-3);
+  opacity: 0;
+  transition: opacity 0.15s ease-in-out;
+}
+
 @keyframes slide-in {
   from {
     opacity: 0;

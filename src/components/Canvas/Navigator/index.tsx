@@ -32,6 +32,7 @@ import { tileLabel } from '~/usecase/util/title';
 import { groupByFrame } from '~/usecase/util/frame';
 import { revealPath } from '~/adapter/shell/shell.client';
 import { writeClipboard } from '~/adapter/clipboard/clipboard.client';
+import { getBinding, formatCombo } from '~/usecase/util/keybindings';
 
 import styles from './styles.module.scss';
 
@@ -315,6 +316,15 @@ const Navigator = ({
       </div>
 
       <div className={styles.resizer} onPointerDown={startResize} />
+      <div className={styles.toggleZone}>
+        <button
+          className={styles.toggle}
+          onClick={onClose}
+          data-tooltip="Hide menu"
+          data-shortcut={formatCombo(getBinding('view.navigator'))}
+          aria-label="Hide menu"
+        />
+      </div>
 
       {menu && <ContextMenu x={menu.x} y={menu.y} onClose={closeMenu} items={menuItems()} />}
     </div>

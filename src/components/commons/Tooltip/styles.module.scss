@@ -1,0 +1,32 @@
+.tooltip {
+  position: fixed;
+  z-index: 10000;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 5px 10px;
+  border: 1px solid var(--border-2);
+  color: var(--text-1);
+  border-radius: 6px;
+  opacity: 0;
+  font-size: 12px;
+  white-space: nowrap;
+  pointer-events: none;
+  background: var(--surface-3);
+  box-shadow: var(--shadow-island);
+  transition: opacity 0.15s ease-in-out;
+
+  kbd {
+    padding: 1px 5px;
+    border: 1px solid var(--border-1);
+    color: var(--text-muted);
+    border-radius: 3px;
+    font-size: 11px;
+    font-family: Hack, monospace;
+    background: var(--hover-1);
+  }
+}
+
+.visible {
+  opacity: 1;
+}

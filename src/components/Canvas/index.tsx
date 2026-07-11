@@ -16,7 +16,7 @@ import { useCanvas } from '~/usecase/hooks/useCanvas';
 import { useWorkspace } from '~/usecase/context/WorkspaceContext';
 import { useNotifyBridge, type NotifyKind } from '~/components/commons/Notifications/bridge';
 import { TILE_GAP, CULL_MARGIN, MIN_LIVE_WIDTH } from '~/usecase/util/constants';
-import { isCapturing, matchCommand, type CommandId } from '~/usecase/util/keybindings';
+import { isCapturing, getBinding, formatCombo, matchCommand, type CommandId } from '~/usecase/util/keybindings';
 
 import styles from './styles.module.scss';
 
@@ -319,6 +319,7 @@ const Canvas = () => {
   );
 
   const hideNav = () => setNavOpen(false);
+  const showNav = () => setNavOpen(true);
 
   useNotifyBridge({ tiles, activeTile, onOpen: openNotified, onAlert: addAlert, onClear: clearAlert });
 
@@ -414,6 +415,17 @@ const Canvas = () => {
           onCloseTile={closeTile}
           onClose={hideNav}
         />
+      )}
+      {!fsId && !navOpen && (
+        <div className={styles.navRevealZone}>
+          <button
+            className={styles.navReveal}
+            onClick={showNav}
+            data-tooltip="Show menu"
+            data-shortcut={formatCombo(getBinding('view.navigator'))}
+            aria-label="Show menu"
+          />
+        </div>
       )}
       {!fsId && activeNote && activeNoteEditor && (
         <NoteToolbar
