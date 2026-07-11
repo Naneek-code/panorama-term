@@ -363,25 +363,35 @@ const GitTab = ({ root, query }: GitTabProps) => {
 
   const clean = status && status.changes.length === 0 && status.unversioned.length === 0;
 
+  const blocked = Boolean(error && !status);
+  const friendly = error && error.includes('not a git repository') ? 'Not a git repository' : error;
+
   return (
     <div className={styles.root}>
       <div className={styles.toolbar}>
         <button className={styles.tool} onClick={load} disabled={refreshing} title="Refresh" aria-label="Refresh">
           <RefreshCw size={12} strokeWidth={2} className={refreshing ? styles.spinning : undefined} />
         </button>
-        <button className={styles.tool} onClick={openViewMenu} title="Group by" aria-label="Group by">
+        <button className={styles.tool} onClick={openViewMenu} disabled={blocked} title="Group by" aria-label="Group by">
           <Eye size={12} strokeWidth={2} />
         </button>
-        <button className={styles.tool} onClick={expandAll} title="Expand all" aria-label="Expand all">
+        <button className={styles.tool} onClick={expandAll} disabled={blocked} title="Expand all" aria-label="Expand all">
           <ListTree size={12} strokeWidth={2} />
         </button>
-        <button className={styles.tool} onClick={collapseAll} title="Collapse all" aria-label="Collapse all">
+        <button
+          className={styles.tool}
+          onClick={collapseAll}
+          disabled={blocked}
+          title="Collapse all"
+          aria-label="Collapse all"
+        >
           <ListCollapse size={12} strokeWidth={2} />
         </button>
       </div>
 
       <div className={styles.list}>
         {!status && !error && <div className={styles.hint}>Loading...</div>}
+        {blocked && <div className={styles.notice}>{friendly}</div>}
         {clean && <div className={styles.hint}>Working tree clean</div>}
         {status && section('changes', 'Changes', status.changes)}
         {status && section('unversioned', 'Unversioned', status.unversioned)}
@@ -390,15 +400,21 @@ const GitTab = ({ root, query }: GitTabProps) => {
       <div className={styles.commit}>
         <div className={styles.commitBar}>
           <label className={styles.amend}>
-            <input type="checkbox" checked={amend} onChange={toggleAmend} />
+            <input type="checkbox" checked={amend} onChange={toggleAmend} disabled={blocked} />
             Amend
           </label>
-          <button className={styles.amendPick} onClick={openAmendMenu}>
+          <button className={styles.amendPick} onClick={openAmendMenu} disabled={blocked}>
             last commit
             <ChevronDown size={11} strokeWidth={2} />
           </button>
           <span className={styles.spacer} />
-          <button className={styles.tool} onClick={openHistory} title="Recent messages" aria-label="Recent messages">
+          <button
+            className={styles.tool}
+            onClick={openHistory}
+            disabled={blocked}
+            title="Recent messages"
+            aria-label="Recent messages"
+          >
             <History size={12} strokeWidth={2} />
           </button>
         </div>
@@ -441,11 +457,12 @@ const GitTab = ({ root, query }: GitTabProps) => {
           className={styles.message}
           value={msg}
           onChange={onMsg}
+          disabled={blocked}
           placeholder="Commit message"
           spellCheck={false}
         />
 
-        {error && <div className={styles.error}>{error}</div>}
+        {error && !blocked && <div className={styles.error}>{error}</div>}
 
         <div className={styles.buttons}>
           <button className={styles.primary} onClick={doCommit} disabled={!canCommit}>
