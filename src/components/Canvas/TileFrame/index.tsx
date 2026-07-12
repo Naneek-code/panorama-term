@@ -125,8 +125,8 @@ const TileFrame = ({ tile, view, active, alert, visible, live, hidden, fullscree
   const note = tile.type === 'note';
   const code = tile.type === 'code';
   const noteTint = note ? { background: tile.color, color: noteTextColor(tile.color || '#fef8c4') } : null;
+  const noteLabel = note ? tile.userTitle?.trim() || 'Note' : null;
   const copyNote = () => onCopyNote(tile.id);
-  const changeTitle = (e: React.ChangeEvent<HTMLInputElement>) => onNoteTitle(tile.id, e.target.value);
   const stopDrag = (e: React.PointerEvent) => e.stopPropagation();
 
   const [menu, setMenu] = React.useState<{ x: number; y: number } | null>(null);
@@ -147,11 +147,17 @@ const TileFrame = ({ tile, view, active, alert, visible, live, hidden, fullscree
     setDraft(tile.userTitle || tile.autoTitle || '');
     setRenaming(true);
   };
+  const startTitleEdit = (e: React.MouseEvent) => {
+    e.stopPropagation();
+    startRename();
+  };
   const commitRename = () => {
     if (!renaming) return;
     setRenaming(false);
     const next = draft.trim();
-    if (next !== (tile.userTitle || '')) onRename(tile.id, next);
+    if (next === (tile.userTitle || '')) return;
+    if (note) onNoteTitle(tile.id, next);
+    else onRename(tile.id, next);
   };
   const onRenameKey = (e: React.KeyboardEvent) => {
     if (e.key === 'Enter') commitRename();
@@ -252,20 +258,12 @@ const TileFrame = ({ tile, view, active, alert, visible, live, hidden, fullscree
               style={{ width: `${progress.pct}%` }}
             />
           )}
-          {note ? (
-            <input
-              className={styles.noteTitle}
-              value={tile.userTitle ?? ''}
-              placeholder="Note"
-              onChange={changeTitle}
-              onPointerDown={stopDrag}
-            />
-          ) : renaming ? (
+          {renaming ? (
             <input
               ref={renameRef}
-              className={styles.renameInput}
+              className={note ? styles.noteTitle : styles.renameInput}
               value={draft}
-              placeholder={tile.autoTitle || 'Terminal'}
+              placeholder={note ? 'Note' : tile.autoTitle || 'Terminal'}
               onBlur={commitRename}
               onChange={(e) => setDraft(e.target.value)}
               onKeyDown={onRenameKey}
@@ -274,13 +272,13 @@ const TileFrame = ({ tile, view, active, alert, visible, live, hidden, fullscree
               autoFocus
             />
           ) : (
-            <span className={styles.title}>
+            <span className={styles.title} data-empty={note && !tile.userTitle?.trim()} onDoubleClick={startTitleEdit}>
               {claudeLive && !spinning && (
                 <span className={styles.claudeMark}>
                   <ClaudeLogo size={11} />
                 </span>
               )}
-              {label}
+              {noteLabel ?? label}
               {folder && folder !== label && (
                 <span className={styles.folder} data-tooltip={tile.cwd}>
                   {folder}

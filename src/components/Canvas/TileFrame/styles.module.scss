@@ -199,6 +199,17 @@
   }
 }
 
+.sticky .title {
+  flex: 1;
+  min-width: 0;
+  color: inherit;
+  font-weight: 600;
+
+  &[data-empty='true'] {
+    opacity: 0.45;
+  }
+}
+
 .sticky .body {
   padding: 0;
 }
