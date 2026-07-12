@@ -31,8 +31,8 @@ interface CodePaneProps {
 const TAB_SIZE = 4;
 const OVERSCAN = 6;
 
-const inRange = (col: number, ranges: IntraLineRange[]): boolean =>
-  ranges.some((r) => col >= r.startCol && col < r.endCol);
+const rangeAt = (col: number, ranges: IntraLineRange[]): IntraLineRange | undefined =>
+  ranges.find((r) => col >= r.startCol && col < r.endCol);
 
 const visualLength = (line: string): number => {
   let n = 0;
@@ -59,7 +59,6 @@ const paintToken = (
   italic: boolean,
   start: number,
   ranges: IntraLineRange[] | null,
-  hl: string,
   key: string
 ): React.ReactNode[] => {
   const style = { color, fontStyle: italic ? ('italic' as const) : undefined };
@@ -85,8 +84,9 @@ const paintToken = (
     const a = sorted[i];
     const b = sorted[i + 1];
     if (a === b) continue;
+    const hit = rangeAt(a, ranges);
     out.push(
-      <span key={`${key}-${i}`} className={inRange(a, ranges) ? hl : undefined} style={style}>
+      <span key={`${key}-${i}`} className={hit ? styles[`hl-${hit.kind}`] : undefined} style={style}>
         {text.slice(a - start, b - start)}
       </span>
     );
@@ -248,14 +248,13 @@ const CodePane = ({ code, lang, side, chunks, current, rows, ranges, overrides, 
           const override = overrides?.get(line);
           const kind = override ?? kinds.get(line);
           const marks = override ? null : (ranges?.get(line) ?? null);
-          const hl = kind ? styles[`hl-${kind}`] : '';
           const lineTokens = tokens?.[line - 1];
 
           const nodes: React.ReactNode[] = [];
           let col = 0;
 
           for (const [j, token] of (lineTokens ?? []).entries()) {
-            nodes.push(...paintToken(token.content, token.color, token.fontStyle === 1, col, marks, hl, `t${j}`));
+            nodes.push(...paintToken(token.content, token.color, token.fontStyle === 1, col, marks, `t${j}`));
             col += token.content.length;
           }
 

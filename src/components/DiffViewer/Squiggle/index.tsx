@@ -36,15 +36,15 @@ interface Geom {
 }
 
 const FILL: Record<ChunkKind, string> = {
-  modify: 'rgba(123, 166, 220, 0.2)',
-  insert: 'rgba(128, 184, 122, 0.2)',
-  delete: 'rgba(217, 124, 124, 0.2)'
+  modify: 'rgba(104, 151, 187, 0.16)',
+  insert: 'rgba(98, 151, 85, 0.16)',
+  delete: 'rgba(199, 84, 80, 0.14)'
 };
 
 const STROKE: Record<ChunkKind, string> = {
-  modify: 'rgba(123, 166, 220, 0.7)',
-  insert: 'rgba(128, 184, 122, 0.7)',
-  delete: 'rgba(217, 124, 124, 0.7)'
+  modify: 'rgba(104, 151, 187, 0.5)',
+  insert: 'rgba(98, 151, 85, 0.5)',
+  delete: 'rgba(199, 84, 80, 0.5)'
 };
 
 const WAVE_AMP = 2;

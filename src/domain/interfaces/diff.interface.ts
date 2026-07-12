@@ -30,6 +30,7 @@ export type UnifiedVisual =
 export interface IntraLineRange {
   startCol: number;
   endCol: number;
+  kind: ChunkKind;
 }
 
 export interface IntraLineHighlights {

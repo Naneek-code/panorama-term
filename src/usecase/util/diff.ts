@@ -286,19 +286,42 @@ const alignChunkLines = (oldChunk: string[], newChunk: string[]): Array<{ oldIdx
 
 const isSpace = (cc: number): boolean => cc === 0x20 || cc === 0x09 || cc === 0x0a || cc === 0x0d;
 
-const tokenizeByWhitespace = (s: string): string[] => {
-  const tokens: string[] = [];
-  let i = 0;
+const isWord = (ch: string): boolean => /\w/.test(ch);
 
-  while (i < s.length) {
-    const ws = isSpace(s.charCodeAt(i));
-    let j = i + 1;
-    while (j < s.length && isSpace(s.charCodeAt(j)) === ws) j++;
-    tokens.push(s.slice(i, j));
-    i = j;
+interface WordToken {
+  text: string;
+  start: number;
+  end: number;
+}
+
+const wordTokens = (s: string): WordToken[] => {
+  const out: WordToken[] = [];
+  const re = /\w+/g;
+  let m: RegExpExecArray | null;
+  while ((m = re.exec(s))) out.push({ text: m[0], start: m.index, end: m.index + m[0].length });
+  return out;
+};
+
+export const coalesceRanges = (raw: string, ranges: IntraLineRange[]): IntraLineRange[] => {
+  const merged: IntraLineRange[] = [];
+
+  for (const r of ranges) {
+    const last = merged[merged.length - 1];
+    if (last && last.kind === r.kind && /^\s*$/.test(raw.slice(last.endCol, r.startCol))) last.endCol = r.endCol;
+    else merged.push({ ...r });
   }
 
-  return tokens;
+  const out: IntraLineRange[] = [];
+
+  for (const r of merged) {
+    let a = r.startCol;
+    let b = r.endCol;
+    while (a < b && isSpace(raw.charCodeAt(a))) a++;
+    while (b > a && isSpace(raw.charCodeAt(b - 1))) b--;
+    if (b > a) out.push({ startCol: a, endCol: b, kind: r.kind });
+  }
+
+  return out;
 };
 
 const push = (map: Map<number, IntraLineRange[]>, line: number, range: IntraLineRange) => {
@@ -316,30 +339,93 @@ const diffLinePair = (
   oldByLine: Map<number, IntraLineRange[]>,
   newByLine: Map<number, IntraLineRange[]>
 ) => {
-  const parts =
-    mode === 'characters'
-      ? diffChars(oldRaw, newRaw).map((p) => ({ added: p.added, removed: p.removed, len: p.value.length }))
-      : diffArrays(tokenizeByWhitespace(oldRaw), tokenizeByWhitespace(newRaw)).map((p) => ({
-          added: p.added,
-          removed: p.removed,
-          len: (p.value as string[]).reduce((n, t) => n + t.length, 0)
-        }));
+  let oldRanges: IntraLineRange[] = [];
+  let newRanges: IntraLineRange[] = [];
 
-  let oCol = 0;
-  let nCol = 0;
+  if (mode === 'characters') {
+    let oCol = 0;
+    let nCol = 0;
 
-  for (const p of parts) {
-    if (p.added) {
-      if (p.len > 0) push(newByLine, newLine, { startCol: nCol, endCol: nCol + p.len });
-      nCol += p.len;
-    } else if (p.removed) {
-      if (p.len > 0) push(oldByLine, oldLine, { startCol: oCol, endCol: oCol + p.len });
-      oCol += p.len;
-    } else {
-      oCol += p.len;
-      nCol += p.len;
+    for (const p of diffChars(oldRaw, newRaw)) {
+      const len = p.value.length;
+      if (p.added) {
+        if (len > 0) newRanges.push({ startCol: nCol, endCol: nCol + len, kind: 'insert' });
+        nCol += len;
+      } else if (p.removed) {
+        if (len > 0) oldRanges.push({ startCol: oCol, endCol: oCol + len, kind: 'delete' });
+        oCol += len;
+      } else {
+        oCol += len;
+        nCol += len;
+      }
     }
+  } else {
+    const oldToks = wordTokens(oldRaw);
+    const newToks = wordTokens(newRaw);
+    const parts = diffArrays(
+      oldToks.map((t) => t.text),
+      newToks.map((t) => t.text)
+    );
+
+    const emit = (oldA: number, oldB: number, newA: number, newB: number) => {
+      let a1 = oldA;
+      let b1 = oldB;
+      let a2 = newA;
+      let b2 = newB;
+      while (a1 < b1 && a2 < b2 && oldRaw[a1] === newRaw[a2]) {
+        a1++;
+        a2++;
+      }
+      while (b1 > a1 && b2 > a2 && oldRaw[b1 - 1] === newRaw[b2 - 1]) {
+        b1--;
+        b2--;
+      }
+      while (a1 < b1 && isSpace(oldRaw.charCodeAt(a1))) a1++;
+      while (b1 > a1 && isSpace(oldRaw.charCodeAt(b1 - 1))) b1--;
+      while (a2 < b2 && isSpace(newRaw.charCodeAt(a2))) a2++;
+      while (b2 > a2 && isSpace(newRaw.charCodeAt(b2 - 1))) b2--;
+      const kind: ChunkKind = b1 > a1 && b2 > a2 ? 'modify' : b1 > a1 ? 'delete' : 'insert';
+      if (b1 > a1) {
+        while (a1 > 0 && isWord(oldRaw[a1]) && isWord(oldRaw[a1 - 1])) a1--;
+        while (b1 < oldRaw.length && isWord(oldRaw[b1 - 1]) && isWord(oldRaw[b1])) b1++;
+        oldRanges.push({ startCol: a1, endCol: b1, kind });
+      }
+      if (b2 > a2) {
+        while (a2 > 0 && isWord(newRaw[a2]) && isWord(newRaw[a2 - 1])) a2--;
+        while (b2 < newRaw.length && isWord(newRaw[b2 - 1]) && isWord(newRaw[b2])) b2++;
+        newRanges.push({ startCol: a2, endCol: b2, kind });
+      }
+    };
+
+    let oi = 0;
+    let ni = 0;
+    let oldFrom = 0;
+    let newFrom = 0;
+
+    for (const p of parts) {
+      const n = p.value.length;
+      if (p.added) ni += n;
+      else if (p.removed) oi += n;
+      else {
+        for (let k = 0; k < n; k++) {
+          const ot = oldToks[oi + k];
+          const nt = newToks[ni + k];
+          emit(oldFrom, ot.start, newFrom, nt.start);
+          oldFrom = ot.end;
+          newFrom = nt.end;
+        }
+        oi += n;
+        ni += n;
+      }
+    }
+
+    emit(oldFrom, oldRaw.length, newFrom, newRaw.length);
+    oldRanges = coalesceRanges(oldRaw, oldRanges);
+    newRanges = coalesceRanges(newRaw, newRanges);
   }
+
+  for (const r of oldRanges) push(oldByLine, oldLine, r);
+  for (const r of newRanges) push(newByLine, newLine, r);
 };
 
 export const computeIntraLine = (
