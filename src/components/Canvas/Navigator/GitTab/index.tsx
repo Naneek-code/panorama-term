@@ -48,13 +48,13 @@ interface GitTabProps {
 const stopClick = (e: React.MouseEvent) => e.stopPropagation();
 
 const STATUS_COLOR: Record<string, string> = {
-  modified: '#5781ea',
-  added: '#6fb14e',
-  deleted: '#c75450',
-  renamed: '#c796e7',
-  copied: '#c796e7',
-  untracked: '#bb956c',
-  conflicted: '#ff6262'
+  modified: '#6897bb',
+  added: '#629755',
+  deleted: '#6f737a',
+  renamed: '#3a87ad',
+  copied: '#3a87ad',
+  untracked: '#d1675a',
+  conflicted: '#d5756c'
 };
 
 const message = (err: unknown): string => (typeof err === 'string' ? err : String(err));
