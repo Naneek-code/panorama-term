@@ -5,9 +5,7 @@ import { join } from 'node:path';
 const isWin = process.platform === 'win32';
 const bin = join('sidecar-rs', 'target', 'debug', isWin ? 'sidecar.exe' : 'sidecar');
 
-const build = spawnSync('cargo', ['build', '--manifest-path', 'sidecar-rs/Cargo.toml'], {
-  stdio: 'inherit'
-});
+const build = spawnSync('bun', ['scripts/sidecar.ts'], { stdio: 'inherit', shell: isWin });
 if (build.status !== 0 || !existsSync(bin)) {
   console.error('[dev] sidecar build failed');
   process.exit(1);

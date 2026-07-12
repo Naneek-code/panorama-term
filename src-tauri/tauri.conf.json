@@ -6,7 +6,7 @@
   "build": {
     "beforeDevCommand": "bun run ui:dev",
     "devUrl": "http://localhost:1471",
-    "beforeBuildCommand": "bun run ui:build",
+    "beforeBuildCommand": "bun run ui:build && bun scripts/sidecar.ts --release",
     "frontendDist": "../dist"
   },
   "app": {
@@ -25,6 +25,7 @@
   "bundle": {
     "active": true,
     "targets": "all",
+    "externalBin": ["binaries/sidecar"],
     "icon": [
       "icons/32x32.png",
       "icons/128x128.png",

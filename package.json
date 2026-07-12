@@ -9,7 +9,7 @@
     "build": "tauri build",
     "ui:dev": "bun scripts/dev.ts",
     "ui:build": "vite build",
-    "sidecar": "cargo build --manifest-path sidecar-rs/Cargo.toml",
+    "sidecar": "bun scripts/sidecar.ts",
     "tauri": "tauri"
   },
   "dependencies": {

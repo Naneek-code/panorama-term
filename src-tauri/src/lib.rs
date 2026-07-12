@@ -17,14 +17,21 @@ fn sidecar_alive() -> bool {
 }
 
 fn sidecar_bin() -> PathBuf {
-    let profile = if cfg!(debug_assertions) { "debug" } else { "release" };
     let name = if cfg!(windows) { "sidecar.exe" } else { "sidecar" };
-    PathBuf::from(env!("CARGO_MANIFEST_DIR"))
-        .join("..")
-        .join("sidecar-rs")
-        .join("target")
-        .join(profile)
-        .join(name)
+
+    if cfg!(debug_assertions) {
+        return PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+            .join("..")
+            .join("sidecar-rs")
+            .join("target")
+            .join("debug")
+            .join(name);
+    }
+
+    std::env::current_exe()
+        .ok()
+        .and_then(|exe| exe.parent().map(|dir| dir.join(name)))
+        .unwrap_or_else(|| PathBuf::from(name))
 }
 
 fn spawn_sidecar() {

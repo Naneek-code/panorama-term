@@ -4,6 +4,7 @@ dist-ssr
 *.local
 
 src-tauri/target
+src-tauri/binaries
 sidecar-rs/target
 
 *.log
