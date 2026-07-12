@@ -248,33 +248,66 @@ const Navigator = ({
   return (
     <div className={styles.panel} style={{ width }}>
       <div className={styles.header}>
-        <button className={styles.action} onClick={newTile} aria-label="New terminal">
-          <Plus size={14} strokeWidth={2} />
-        </button>
-        <button className={styles.action} onClick={onClose} title="Close menu" aria-label="Close menu">
+        <div className={styles.tabs}>
+          <button
+            className={styles.tab}
+            onClick={showFiles}
+            aria-label="Files"
+            data-tooltip="Files"
+            data-tooltip-place="bottom"
+            data-active={tab === 'files' || undefined}
+          >
+            <FolderTree size={14} strokeWidth={2} />
+          </button>
+          <button
+            className={styles.tab}
+            onClick={showTiles}
+            aria-label="Tiles"
+            data-tooltip="Tiles"
+            data-tooltip-place="bottom"
+            data-active={tab === 'tiles' || undefined}
+          >
+            <Layers size={14} strokeWidth={2} />
+          </button>
+          <button
+            className={styles.tab}
+            onClick={showGit}
+            aria-label="Git"
+            data-tooltip="Git"
+            data-tooltip-place="bottom"
+            data-active={tab === 'git' || undefined}
+          >
+            <GitBranch size={14} strokeWidth={2} />
+          </button>
+        </div>
+        <button
+          className={styles.action}
+          onClick={onClose}
+          aria-label="Close menu"
+          data-tooltip="Close menu"
+          data-tooltip-place="bottom"
+        >
           <PanelLeftClose size={14} strokeWidth={1.75} />
         </button>
       </div>
 
-      <div className={styles.tabs}>
-        <button className={styles.tab} onClick={showFiles} data-active={tab === 'files' || undefined}>
-          <FolderTree size={12} strokeWidth={2} />
-          Files
-        </button>
-        <button className={styles.tab} onClick={showTiles} data-active={tab === 'tiles' || undefined}>
-          <Layers size={12} strokeWidth={2} />
-          Tiles
-        </button>
-        <button className={styles.tab} onClick={showGit} data-active={tab === 'git' || undefined}>
-          <GitBranch size={12} strokeWidth={2} />
-          Git
-        </button>
-      </div>
-
       {tab !== 'git' && (
-        <div className={styles.filter}>
-          <Search size={12} strokeWidth={2} />
-          <input value={query} onChange={onQuery} placeholder="Filter" />
+        <div className={styles.search}>
+          <div className={styles.filter}>
+            <Search size={12} strokeWidth={2} />
+            <input value={query} onChange={onQuery} placeholder="Filter" />
+          </div>
+          {tab === 'tiles' && (
+            <button
+              className={styles.new}
+              onClick={newTile}
+              aria-label="New terminal"
+              data-tooltip="New terminal"
+              data-tooltip-place="bottom"
+            >
+              <Plus size={14} strokeWidth={2} />
+            </button>
+          )}
         </div>
       )}
 

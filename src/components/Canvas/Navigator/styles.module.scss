@@ -94,6 +94,7 @@
   display: flex;
   align-items: center;
   justify-content: space-between;
+  gap: 8px;
   padding: 8px;
 }
 
@@ -122,7 +123,6 @@
 .tabs {
   display: flex;
   gap: 2px;
-  margin: 0 8px 8px;
   padding: 2px;
   border-radius: 7px;
   background: var(--hover-soft);
@@ -130,19 +130,14 @@
 
 .tab {
   display: flex;
-  height: 26px;
-  flex: 1;
+  width: 30px;
+  height: 24px;
   align-items: center;
   justify-content: center;
-  gap: 6px;
   border: none;
   cursor: pointer;
   color: var(--text-muted);
   border-radius: 5px;
-  font-size: 11px;
-  font-weight: 600;
-  text-transform: uppercase;
-  letter-spacing: 0.04em;
   background: transparent;
   transition:
     background 0.12s ease,
@@ -159,12 +154,43 @@
   }
 }
 
-.filter {
+.search {
   display: flex;
   align-items: center;
   gap: 6px;
-  height: 28px;
   margin: 0 8px 8px;
+}
+
+.new {
+  display: flex;
+  width: 28px;
+  height: 28px;
+  flex: none;
+  align-items: center;
+  justify-content: center;
+  padding: 0;
+  border: 1px solid var(--border-2);
+  cursor: pointer;
+  color: var(--text-muted);
+  border-radius: 6px;
+  background: transparent;
+  transition:
+    background 0.12s ease,
+    color 0.12s ease;
+
+  &:hover {
+    color: var(--text-1);
+    background: var(--hover-1);
+  }
+}
+
+.filter {
+  display: flex;
+  flex: 1;
+  min-width: 0;
+  align-items: center;
+  gap: 6px;
+  height: 28px;
   padding: 0 10px;
   border: 1px solid var(--border-1);
   color: var(--text-muted);
