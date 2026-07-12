@@ -10,6 +10,7 @@ import {
   Trash2,
   Pencil,
   Network,
+  Container,
   GitBranch,
   Crosshair,
   FolderTree,
@@ -27,10 +28,12 @@ import type { DirEntry } from '~/adapter/fs/fs.client';
 import type { NotifyKind } from '~/components/commons/Notifications/bridge';
 import GitTab from '~/components/Canvas/Navigator/GitTab';
 import FileTree from '~/components/Canvas/Navigator/FileTree';
+import DockerTab from '~/components/Canvas/Navigator/DockerTab';
 import ContextMenu from '~/components/commons/ContextMenu';
 import { tileLabel } from '~/usecase/util/title';
 import { groupByFrame } from '~/usecase/util/frame';
 import { revealPath } from '~/adapter/shell/shell.client';
+import { dockerAvailable } from '~/adapter/docker/docker.client';
 import { writeClipboard } from '~/adapter/clipboard/clipboard.client';
 import { getBinding, formatCombo } from '~/usecase/util/keybindings';
 
@@ -92,8 +95,15 @@ const Navigator = ({
   onOpenDiff,
   onClose
 }: NavigatorProps) => {
-  const [tab, setTab] = React.useState<'files' | 'tiles' | 'git'>('files');
+  const [tab, setTab] = React.useState<'files' | 'tiles' | 'git' | 'docker'>('files');
+  const [hasDocker, setHasDocker] = React.useState(false);
   const [width, setWidth] = React.useState(savedWidth);
+
+  React.useEffect(() => {
+    dockerAvailable()
+      .then(setHasDocker)
+      .catch(() => setHasDocker(false));
+  }, []);
   const [query, setQuery] = React.useState('');
   const [collapsed, setCollapsed] = React.useState<Set<string>>(() => new Set());
   const [renaming, setRenaming] = React.useState<string | null>(null);
@@ -123,6 +133,7 @@ const Navigator = ({
   const showTiles = () => setTab('tiles');
   const showFiles = () => setTab('files');
   const showGit = () => setTab('git');
+  const showDocker = () => setTab('docker');
 
   const toggleFrame = (id: string) => {
     setCollapsed((prev) => {
@@ -279,6 +290,18 @@ const Navigator = ({
           >
             <GitBranch size={14} strokeWidth={2} />
           </button>
+          {hasDocker && (
+            <button
+              className={styles.tab}
+              onClick={showDocker}
+              aria-label="Docker"
+              data-tooltip="Docker"
+              data-tooltip-place="bottom"
+              data-active={tab === 'docker' || undefined}
+            >
+              <Container size={14} strokeWidth={2} />
+            </button>
+          )}
         </div>
         <button
           className={styles.action}
@@ -325,7 +348,9 @@ const Navigator = ({
           <div className={styles.empty}>Focus a terminal to see its repo</div>
         ))}
 
-      <div className={styles.body} style={{ display: tab === 'git' ? 'none' : undefined }}>
+      {tab === 'docker' && <DockerTab query={needle} />}
+
+      <div className={styles.body} style={{ display: tab === 'git' || tab === 'docker' ? 'none' : undefined }}>
         {tab === 'tiles' && (
           <>
             {frames.map((frame) => {

@@ -7,6 +7,7 @@ use tauri::{LogicalPosition, LogicalSize, Manager, WebviewUrl, WebviewWindowBuil
 
 mod git;
 mod store;
+mod docker;
 
 const SIDECAR_PORT: u16 = 9777;
 const NOTIF_WIDTH: f64 = 448.0;
@@ -375,7 +376,11 @@ pub fn run() {
             git::git_rollback_file,
             git::git_revert_hunk,
             git::git_watch_file,
-            git::git_unwatch_file
+            git::git_unwatch_file,
+            docker::docker_available,
+            docker::docker_ps,
+            docker::docker_action,
+            docker::docker_engine
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
