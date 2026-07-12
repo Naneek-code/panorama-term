@@ -39,6 +39,12 @@ const pause = (ms: number): Promise<void> => new Promise((r) => setTimeout(r, ms
 const progressColor = (p: number): string =>
   p >= 75 ? '#ef4444' : p >= 60 ? '#f97316' : p >= 30 ? '#eab308' : '#22c55e';
 
+const formatCost = (v: number): string => {
+  if (v > 0 && v < 0.01) return '<$0.01';
+  if (v >= 1000) return `$${(v / 1000).toFixed(1)}k`;
+  return `$${v.toFixed(2)}`;
+};
+
 const matchQuickSwitchId = (raw: string | undefined): string => {
   if (!raw) return '';
   const m = raw.toLowerCase();
@@ -616,7 +622,7 @@ const AgentBar = ({ tileId, active, send, getLines, getStructured, focusTerminal
   const effort = structured?.effort ?? '';
   const effortColor = EFFORT_LEVELS.find((l) => l.id === effort)?.color;
 
-  const hasStatus = Boolean(parsed.model || parsed.mode || parsed.focused || parsed.progress != null || effort);
+  const hasStatus = Boolean(parsed.model || parsed.mode || parsed.focused || parsed.progress != null || effort || structured?.costUsd != null);
 
   const suggestFetch = { slash: fetchSlash, model: fetchModels, effort: fetchEfforts };
   const suggestSelect = { slash: onSlashSelect, model: onModelSelect, effort: onEffortSelect };
@@ -758,15 +764,24 @@ const AgentBar = ({ tileId, active, send, getLines, getStructured, focusTerminal
                 <span className={styles.chipLabel}>focus</span>
               </span>
             )}
-            {parsed.progress != null && (
-              <span className={styles.progress}>
-                <span className={styles.track}>
-                  <span
-                    className={styles.fill}
-                    style={{ width: `${Math.min(100, Math.max(0, parsed.progress))}%`, background: progressColor(parsed.progress) }}
-                  />
-                </span>
-                <span className={styles.progressLabel}>{parsed.progress}%</span>
+            {(parsed.progress != null || structured?.costUsd != null) && (
+              <span className={styles.meter}>
+                {structured?.costUsd != null && (
+                  <span className={`${styles.chip} ${styles.cost}`}>
+                    <span className={styles.chipLabel}>{formatCost(structured.costUsd)}</span>
+                  </span>
+                )}
+                {parsed.progress != null && (
+                  <>
+                    <span className={styles.track}>
+                      <span
+                        className={styles.fill}
+                        style={{ width: `${Math.min(100, Math.max(0, parsed.progress))}%`, background: progressColor(parsed.progress) }}
+                      />
+                    </span>
+                    <span className={styles.progressLabel}>{parsed.progress}%</span>
+                  </>
+                )}
               </span>
             )}
           </div>
