@@ -42,6 +42,12 @@ const QUAD = [0b0010, 0b0001, 0b1000, 0b1011, 0b1001, 0b1110, 0b1101, 0b0100, 0b
 
 let cellW = 7.23;
 let fontReady = false;
+
+const devicePx = (v: number): number => {
+  const dpr = window.devicePixelRatio || 1;
+  return Math.round(v * dpr) / dpr;
+};
+
 const measureCell = () => {
   const c = document.createElement('canvas').getContext('2d');
   if (!c) return;
@@ -654,7 +660,7 @@ const GridTerminal = ({ tileId, cwd, cols, rows, active, visible, k, restartKey,
     <>
       <canvas
         ref={canvasRef}
-        style={{ top: 'auto', bottom: 6 * k, height: rows * CELL_H * k }}
+        style={{ top: 'auto', bottom: devicePx(6 * k), height: devicePx(rows * CELL_H * k) }}
         tabIndex={-1}
         onWheel={onWheel}
         onKeyDown={onKeyDown}
