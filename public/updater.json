@@ -1,7 +1,7 @@
 {
   "version": "0.1.0",
-  "notes": "",
-  "pub_date": "2026-07-13T00:00:00Z",
-  "url": "",
-  "signature": ""
+  "notes": "### Added\n- Initial release: infinite canvas with terminal tiles, notes, frames, and workspaces.\n- Rust sidecar PTY host with Canvas 2D grid terminal rendering.\n- Claude agent bar with image paste and structured transcript state.\n- Git integration: branch menu with pull, push and branch actions, changes tab with commit, diff viewer with hunk revert, ahead/behind indicators.\n- Desktop notifications for agent activity.\n- Auto-updater with in-app download and restart.",
+  "pub_date": "2026-07-13T18:59:58Z",
+  "url": "https://github.com/Frenvius/panorama-term/releases/download/v0.1.0/Panorama_0.1.0_x64-setup.exe",
+  "signature": "dW50cnVzdGVkIGNvbW1lbnQ6IHNpZ25hdHVyZSBmcm9tIHRhdXJpIHNlY3JldCBrZXkKUlVRNzArQ1N1YUxFVG5JVVRVVzZIWGZTU21QRFpOYUFPY1g5Z1NSWEVjN1hNS0xma09BZnpoUGlHZjk5ZUQwZDdsWXJiY2lTM0VhMVZVSERXQ0dXbTZtR3R0cytpVXdJelFzPQp0cnVzdGVkIGNvbW1lbnQ6IHRpbWVzdGFtcDoxNzgzOTY5MTk1CWZpbGU6UGFub3JhbWFfMC4xLjBfeDY0LXNldHVwLmV4ZQpPQ24xNmx1NGpLQnpIaXMyK1RjdnVQaDVvSlRDK3VUNjg3YmtIT0R3T1c5TVpMVHZKdTZ3S3BDdWVFS3NGempzQUp3TG5GT2FYcnlwaWtnSHE1czBDUT09Cg=="
 }
