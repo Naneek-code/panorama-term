@@ -7,7 +7,7 @@ import ClaudeLogo from '~/components/commons/ClaudeLogo';
 import { writeTempImage } from '~/adapter/clipboard/clipboard.client';
 import { readFooter, modeKey, prettyMode, prettyModel, looksLikeClaude, detectExitBanner, parseStatusLines, detectSuggestTrigger } from './parse';
 import { BPM_END, draftKey, BPM_START, HISTORY_KEY, EFFORT_LEVELS, CLAUDE_MODELS, CLAUDE_SLASH_COMMANDS, MODEL_QUICK_SWITCHES } from './constants';
-import { cloneDraft, EMPTY_DRAFT, partsToDraft, draftToParts, isDraftEmpty, renderEditor, getCaretOffset, serializeEditor, placeCaretAtEnd, consolidateParts, draftToSendParts, insertPartsAtCaret, isCaretOnLastLine, isCaretOnFirstLine } from './editor';
+import { cloneDraft, removeChip, EMPTY_DRAFT, partsToDraft, draftToParts, isDraftEmpty, renderEditor, replaceEditor, getCaretOffset, serializeEditor, placeCaretAtEnd, consolidateParts, draftToSendParts, insertPartsAtCaret, isCaretOnLastLine, isCaretOnFirstLine } from './editor';
 
 import type { ClaudeState } from '~/domain/interfaces/pty.interface';
 import type { ContentPart, ParsedStatus, SuggestTrigger, AgentBarProps, PromptSuggestion, AgentSuggestHandle } from './types';
@@ -88,6 +88,7 @@ const AgentBar = ({ tileId, active, send, getLines, getStructured, focusTerminal
   const histDraftRef = React.useRef(cloneDraft(EMPTY_DRAFT));
   const lastSentRef = React.useRef(cloneDraft(EMPTY_DRAFT));
   const draftRef = React.useRef(cloneDraft(EMPTY_DRAFT));
+  const silentRef = React.useRef(false);
   const imgSeqRef = React.useRef(0);
   const submitSeqRef = React.useRef(0);
   const seenRef = React.useRef(false);
@@ -117,6 +118,15 @@ const AgentBar = ({ tileId, active, send, getLines, getStructured, focusTerminal
       el.focus({ preventScroll: true });
       placeCaretAtEnd(el);
     }
+    draftRef.current = next;
+  };
+
+  const applyDraft = (next: { text: string; images: string[] }) => {
+    const el = editorRef.current;
+    if (!el) return;
+    silentRef.current = true;
+    replaceEditor(el, next);
+    silentRef.current = false;
     draftRef.current = next;
   };
 
@@ -330,8 +340,7 @@ const AgentBar = ({ tileId, active, send, getLines, getStructured, focusTerminal
     histDraftRef.current = cloneDraft(EMPTY_DRAFT);
     setSuggest(null);
     setDraft(cloneDraft(EMPTY_DRAFT));
-    draftRef.current = cloneDraft(EMPTY_DRAFT);
-    if (editorRef.current) editorRef.current.textContent = '';
+    applyDraft(cloneDraft(EMPTY_DRAFT));
     setSubmitting(true);
     try {
       await sendDraft(submission);
@@ -342,7 +351,7 @@ const AgentBar = ({ tileId, active, send, getLines, getStructured, focusTerminal
 
   const handleInput = () => {
     const el = editorRef.current;
-    if (!el) return;
+    if (!el || silentRef.current) return;
     const next = serializeEditor(el);
     setDraft(next);
     draftRef.current = next;
@@ -362,14 +371,10 @@ const AgentBar = ({ tileId, active, send, getLines, getStructured, focusTerminal
       e.preventDefault();
       e.stopPropagation();
       const chip = removeBtn.closest('[data-imgpath]');
-      if (chip) {
-        chip.remove();
+      const el = editorRef.current;
+      if (chip && el) {
+        removeChip(el, chip);
         syncFromEditor();
-        const el = editorRef.current;
-        if (el) {
-          el.focus({ preventScroll: true });
-          placeCaretAtEnd(el);
-        }
       }
       return;
     }
@@ -466,7 +471,7 @@ const AgentBar = ({ tileId, active, send, getLines, getStructured, focusTerminal
     const doSubmit = submit && !noSubmit;
     const next = { text: name + (doSubmit ? '' : ' '), images: [] };
     setDraft(next);
-    renderAndFocus(next);
+    applyDraft(next);
     if (name === '/model') setSuggest({ kind: 'model', query: '' });
     else if (name === '/effort') setSuggest({ kind: 'effort', query: '' });
     else setSuggest(null);
@@ -476,7 +481,7 @@ const AgentBar = ({ tileId, active, send, getLines, getStructured, focusTerminal
   const onEffortSelect = (item: PromptSuggestion, submit?: boolean) => {
     const next = { text: `/effort ${item.display}`, images: [] };
     setDraft(next);
-    renderAndFocus(next);
+    applyDraft(next);
     setSuggest(null);
     if (submit) void handleSend();
   };
@@ -484,7 +489,7 @@ const AgentBar = ({ tileId, active, send, getLines, getStructured, focusTerminal
   const onModelSelect = (item: PromptSuggestion, submit?: boolean) => {
     const next = { text: `/model ${item.display}`, images: [] };
     setDraft(next);
-    renderAndFocus(next);
+    applyDraft(next);
     setSuggest(null);
     if (submit) void handleSend();
   };
@@ -492,7 +497,7 @@ const AgentBar = ({ tileId, active, send, getLines, getStructured, focusTerminal
   const onModelHighlight = (item: PromptSuggestion) => {
     const next = { text: `/model ${item.display}`, images: [] };
     setDraft(next);
-    renderAndFocus(next, false);
+    applyDraft(next);
   };
 
   const stepHistory = (dir: -1 | 1): boolean => {
@@ -509,7 +514,7 @@ const AgentBar = ({ tileId, active, send, getLines, getStructured, focusTerminal
       }
       const next = partsToDraft(hist[histIdxRef.current] ?? []);
       setDraft(next);
-      renderAndFocus(next);
+      applyDraft(next);
       setSuggest(null);
       return true;
     }
@@ -518,12 +523,12 @@ const AgentBar = ({ tileId, active, send, getLines, getStructured, focusTerminal
       histIdxRef.current++;
       const next = partsToDraft(hist[histIdxRef.current] ?? []);
       setDraft(next);
-      renderAndFocus(next);
+      applyDraft(next);
     } else {
       histIdxRef.current = null;
       const restored = cloneDraft(histDraftRef.current);
       setDraft(restored);
-      renderAndFocus(restored);
+      applyDraft(restored);
     }
     setSuggest(null);
     return true;
@@ -552,7 +557,7 @@ const AgentBar = ({ tileId, active, send, getLines, getStructured, focusTerminal
         setDraft(restored);
         histIdxRef.current = null;
         setSuggest(null);
-        renderAndFocus(restored);
+        applyDraft(restored);
       }
       return;
     }

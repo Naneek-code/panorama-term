@@ -4,6 +4,8 @@ import styles from './styles.module.scss';
 
 export const EMPTY_DRAFT: DraftState = { text: '', images: [] };
 
+const NBSP = String.fromCharCode(0xa0);
+
 export const cloneDraft = (d: DraftState): DraftState => ({ text: d.text, images: [...d.images] });
 
 export const isDraftEmpty = (d: DraftState): boolean =>
@@ -64,27 +66,51 @@ export const consolidateParts = (parts: ContentPart[]): ContentPart[] => {
   return out;
 };
 
-const makeImageChip = (num: number, path: string): HTMLSpanElement => {
-  const span = document.createElement('span');
-  span.contentEditable = 'false';
-  span.className = styles.imageChip;
-  span.dataset.imgpath = path;
-  span.title = path;
+const escapeHtml = (s: string): string =>
+  s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
 
-  const label = document.createElement('span');
-  label.textContent = `Image #${num}`;
-  span.appendChild(label);
+const textToHtml = (text: string): string => text.split('\n').map(escapeHtml).join('<br>');
 
-  const remove = document.createElement('button');
-  remove.type = 'button';
-  remove.className = styles.imageRemove;
-  remove.dataset.imgremove = '1';
-  remove.tabIndex = -1;
-  remove.setAttribute('aria-label', 'Remove image');
-  remove.textContent = 'x';
-  span.appendChild(remove);
+const chipToHtml = (num: number, path: string, mark = false): string => {
+  const p = escapeHtml(path);
+  return (
+    `<span contenteditable="false" class="${styles.imageChip}" data-imgpath="${p}"${mark ? ' data-caretmark="1"' : ''} title="${p}">` +
+    `<span>Image #${num}</span>` +
+    `<button type="button" class="${styles.imageRemove}" data-imgremove="1" tabindex="-1" aria-label="Remove image">x</button>` +
+    `</span>`
+  );
+};
 
-  return span;
+export const draftToHtml = (draft: DraftState): string => {
+  const re = /\[Image #(\d+)\]/g;
+  let out = '';
+  let last = 0;
+  let count = 0;
+  let match: RegExpExecArray | null;
+  while ((match = re.exec(draft.text)) !== null) {
+    const before = draft.text.slice(last, match.index);
+    if (before.length > 0) out += textToHtml(before);
+    const idx = parseInt(match[1] ?? '', 10) - 1;
+    const img = draft.images[idx];
+    if (idx >= 0 && img !== undefined) {
+      count++;
+      out += chipToHtml(count, img);
+    } else {
+      out += textToHtml(match[0]);
+    }
+    last = match.index + match[0].length;
+  }
+  const after = draft.text.slice(last);
+  if (after.length > 0) out += textToHtml(after);
+  return out;
+};
+
+const selectAll = (el: HTMLElement): void => {
+  const range = document.createRange();
+  range.selectNodeContents(el);
+  const sel = window.getSelection();
+  sel?.removeAllRanges();
+  sel?.addRange(range);
 };
 
 export const serializeEditor = (el: HTMLElement): DraftState => {
@@ -92,7 +118,7 @@ export const serializeEditor = (el: HTMLElement): DraftState => {
   let text = '';
   const walk = (node: Node) => {
     if (node.nodeType === Node.TEXT_NODE) {
-      text += node.textContent ?? '';
+      text += (node.textContent ?? '').split(NBSP).join(' ');
       return;
     }
     if (!(node instanceof HTMLElement)) return;
@@ -114,34 +140,26 @@ export const serializeEditor = (el: HTMLElement): DraftState => {
 };
 
 export const renderEditor = (el: HTMLElement, draft: DraftState): void => {
-  el.textContent = '';
-  const appendText = (chunk: string) => {
-    const lines = chunk.split('\n');
-    for (let i = 0; i < lines.length; i++) {
-      if (i > 0) el.appendChild(document.createElement('br'));
-      const ln = lines[i];
-      if (ln) el.appendChild(document.createTextNode(ln));
-    }
-  };
-  const re = /\[Image #(\d+)\]/g;
-  let last = 0;
-  let count = 0;
-  let match: RegExpExecArray | null;
-  while ((match = re.exec(draft.text)) !== null) {
-    const before = draft.text.slice(last, match.index);
-    if (before.length > 0) appendText(before);
-    const idx = parseInt(match[1] ?? '', 10) - 1;
-    const img = draft.images[idx];
-    if (idx >= 0 && img !== undefined) {
-      count++;
-      el.appendChild(makeImageChip(count, img));
-    } else {
-      appendText(match[0]);
-    }
-    last = match.index + match[0].length;
-  }
-  const after = draft.text.slice(last);
-  if (after.length > 0) appendText(after);
+  el.innerHTML = draftToHtml(draft);
+};
+
+export const replaceEditor = (el: HTMLElement, draft: DraftState): void => {
+  el.focus({ preventScroll: true });
+  selectAll(el);
+  const html = draftToHtml(draft);
+  if (html.length > 0) document.execCommand('insertHTML', false, html);
+  else document.execCommand('delete');
+  placeCaretAtEnd(el);
+};
+
+export const removeChip = (el: HTMLElement, chip: Element): void => {
+  el.focus({ preventScroll: true });
+  const range = document.createRange();
+  range.selectNode(chip);
+  const sel = window.getSelection();
+  sel?.removeAllRanges();
+  sel?.addRange(range);
+  document.execCommand('delete');
 };
 
 export const placeCaretAtEnd = (el: HTMLElement): void => {
@@ -170,46 +188,25 @@ export const getCaretOffset = (el: HTMLElement): number | null => {
   return serializeEditor(tmp).text.length;
 };
 
-export const insertPartsAtCaret = (
-  el: HTMLElement,
-  text: string,
-  imagePaths: string[],
-  startNum: number
-): void => {
-  const sel = window.getSelection();
-  let range: Range;
-  if (sel && sel.rangeCount > 0 && el.contains(sel.anchorNode)) {
-    range = sel.getRangeAt(0);
-  } else {
-    range = document.createRange();
-    range.selectNodeContents(el);
-    range.collapse(false);
-  }
-  range.deleteContents();
-
-  const frag = document.createDocumentFragment();
-  if (text.length > 0) {
-    const lines = text.split('\n');
-    for (let i = 0; i < lines.length; i++) {
-      if (i > 0) frag.appendChild(document.createElement('br'));
-      const ln = lines[i];
-      if (ln) frag.appendChild(document.createTextNode(ln));
-    }
-  }
+export const insertPartsAtCaret = (el: HTMLElement, text: string, imagePaths: string[], startNum: number): void => {
+  let html = text.length > 0 ? textToHtml(text) : '';
   for (let i = 0; i < imagePaths.length; i++) {
     const p = imagePaths[i];
-    if (p !== undefined) frag.appendChild(makeImageChip(startNum + i, p));
+    if (p !== undefined) html += chipToHtml(startNum + i, p, i === imagePaths.length - 1);
   }
-
-  const lastNode = frag.lastChild;
-  range.insertNode(frag);
-
-  const after = document.createRange();
-  if (lastNode) after.setStartAfter(lastNode);
-  else after.setStart(range.endContainer, range.endOffset);
-  after.collapse(true);
+  if (html.length === 0) return;
+  document.execCommand('insertHTML', false, html);
+  const marks = el.querySelectorAll('[data-caretmark]');
+  const lastMark = marks[marks.length - 1];
+  for (const m of Array.from(marks)) m.removeAttribute('data-caretmark');
+  if (!lastMark) return;
+  const range = document.createRange();
+  range.setStartAfter(lastMark);
+  range.collapse(true);
+  const sel = window.getSelection();
   sel?.removeAllRanges();
-  sel?.addRange(after);
+  sel?.addRange(range);
+  document.execCommand('insertText', false, ' ');
 };
 
 const getCaretRect = (el: HTMLElement): DOMRect | null => {
