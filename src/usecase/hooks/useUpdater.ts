@@ -24,7 +24,7 @@ const INITIAL_STATE: UpdaterState = {
   currentVersion: null,
 };
 
-const isTauri = () => typeof window !== 'undefined' && '__TAURI_INTERNALS__' in window;
+const canUpdate = () => !import.meta.env.DEV && typeof window !== 'undefined' && '__TAURI_INTERNALS__' in window;
 
 export const useUpdater = () => {
   const [state, setState] = React.useState<UpdaterState>(INITIAL_STATE);
@@ -32,7 +32,7 @@ export const useUpdater = () => {
   const checkingRef = React.useRef(false);
 
   const checkForUpdate = React.useCallback(async () => {
-    if (!isTauri() || checkingRef.current) return;
+    if (!canUpdate() || checkingRef.current) return;
     checkingRef.current = true;
     setState((prev) => ({ ...prev, error: null, status: 'checking' }));
 
@@ -98,7 +98,7 @@ export const useUpdater = () => {
   }, []);
 
   React.useEffect(() => {
-    if (!isTauri()) return;
+    if (!canUpdate()) return;
     const timer = window.setTimeout(() => void checkForUpdate(), 3000);
     return () => window.clearTimeout(timer);
   }, [checkForUpdate]);
