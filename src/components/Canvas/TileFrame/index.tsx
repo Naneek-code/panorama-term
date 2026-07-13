@@ -23,6 +23,7 @@ interface TileFrameProps {
   tile: Tile;
   view: View;
   active: boolean;
+  selected: boolean;
   alert: NotifyKind | null;
   visible: boolean;
   live: boolean;
@@ -49,6 +50,7 @@ interface TileFrameProps {
   onReveal: (id: string) => void;
   onDuplicate: (id: string) => void;
   onTogglePin: (id: string) => void;
+  onToggleSelect: (id: string) => void;
 }
 
 const HANDLES = ['n', 's', 'e', 'w', 'nw', 'ne', 'sw', 'se'];
@@ -60,7 +62,7 @@ const devicePx = (v: number): number => {
   return Math.round(v * dpr) / dpr;
 };
 
-const TileFrame = ({ tile, view, active, alert, visible, live, hidden, fullscreen, exiting, vpW, vpH, onMove, onSnap, onClose, onResize, onActivate, onFocusTile, onToggleFullscreen, onCwd, onOscTitle, onNoteChange, onNoteEditor, onNoteTitle, onCopyNote, onRename, onCopyPath, onReveal, onDuplicate, onTogglePin }: TileFrameProps) => {
+const TileFrame = ({ tile, view, active, selected, alert, visible, live, hidden, fullscreen, exiting, vpW, vpH, onMove, onSnap, onClose, onResize, onActivate, onFocusTile, onToggleFullscreen, onCwd, onOscTitle, onNoteChange, onNoteEditor, onNoteTitle, onCopyNote, onRename, onCopyPath, onReveal, onDuplicate, onTogglePin, onToggleSelect }: TileFrameProps) => {
   const k = view.k;
   const drag = React.useRef<{ sx: number; sy: number; ox: number; oy: number } | null>(null);
   const resize = React.useRef<{ x: number; y: number; dir: string } | null>(null);
@@ -73,7 +75,11 @@ const TileFrame = ({ tile, view, active, alert, visible, live, hidden, fullscree
   const startDrag = (e: React.PointerEvent) => {
     if (e.button !== 0 || fullscreen) return;
     e.stopPropagation();
-    onActivate(tile.id);
+    if (e.shiftKey) {
+      onToggleSelect(tile.id);
+      return;
+    }
+    if (!selected) onActivate(tile.id);
     if (tile.pinned) return;
     (e.target as Element).setPointerCapture(e.pointerId);
     drag.current = { sx: e.clientX, sy: e.clientY, ox: tile.x, oy: tile.y };
@@ -238,7 +244,7 @@ const TileFrame = ({ tile, view, active, alert, visible, live, hidden, fullscree
   const termCols = Math.max(20, Math.floor((bodyW - 8) / 7.23));
   const termRows = Math.max(2, Math.floor((bodyH - TILE_HEADER - 11) / 15));
   const anim = fullscreen ? (exiting ? styles.fsExit : styles.fsEnter) : null;
-  const cls = [styles.tile, note && styles.sticky, tile.pinned && styles.pinnedTile, active && !fullscreen && styles.active, anim].filter(Boolean).join(' ');
+  const cls = [styles.tile, note && styles.sticky, tile.pinned && styles.pinnedTile, selected && !fullscreen && styles.selected, active && !fullscreen && styles.active, anim].filter(Boolean).join(' ');
   const gone = { display: hidden ? 'none' : undefined };
 
   return (

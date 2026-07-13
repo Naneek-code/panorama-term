@@ -89,6 +89,14 @@
   transition: opacity 0.15s ease-in-out;
 }
 
+.marquee {
+  position: absolute;
+  z-index: 100;
+  border: 1px solid var(--accent);
+  background: color-mix(in srgb, var(--accent) 10%, transparent);
+  pointer-events: none;
+}
+
 .indicator {
   position: absolute;
   left: 12px;

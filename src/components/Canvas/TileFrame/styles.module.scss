@@ -12,6 +12,11 @@
   backdrop-filter: blur(16px);
 }
 
+.selected {
+  outline: 2px solid var(--accent);
+  outline-offset: 1.5px;
+}
+
 .active {
   outline: 2px dashed var(--accent);
   outline-offset: 1.5px;

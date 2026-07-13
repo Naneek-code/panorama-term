@@ -55,6 +55,8 @@ export const useCanvas = ({ seed, onPersist }: UseCanvasArgs) => {
   const [tiles, setTiles] = React.useState<Tile[]>(initial.current.tiles);
   const [view, setView] = React.useState<View>(initial.current.view);
   const [activeTile, setActiveTile] = React.useState<string | null>(null);
+  const [selected, setSelected] = React.useState<Set<string>>(() => new Set());
+  const [marquee, setMarquee] = React.useState<{ x: number; y: number; width: number; height: number } | null>(null);
 
   const bgRef = React.useRef<HTMLDivElement>(null);
   const gridRef = React.useRef<HTMLCanvasElement>(null);
@@ -68,6 +70,9 @@ export const useCanvas = ({ seed, onPersist }: UseCanvasArgs) => {
   tilesRef.current = tiles;
   const framesRef = React.useRef(frames);
   framesRef.current = frames;
+  const selectedRef = React.useRef(selected);
+  selectedRef.current = selected;
+  const marqueeRef = React.useRef<{ ox: number; oy: number; add: boolean } | null>(null);
 
   const snapRaf = React.useRef(0);
   const focusRaf = React.useRef(0);
@@ -274,6 +279,24 @@ export const useCanvas = ({ seed, onPersist }: UseCanvasArgs) => {
     const prev = tilesRef.current;
     const moving = prev.find((t) => t.id === id);
     if (!moving) return;
+    const sel = selectedRef.current;
+    if (sel.has(id) && sel.size > 1) {
+      const dx = rawX - moving.x;
+      const dy = rawY - moving.y;
+      const members = prev.filter((t) => sel.has(t.id) && !t.pinned);
+      if (!members.length) return;
+      const minX = Math.min(...members.map((t) => t.x));
+      const minY = Math.min(...members.map((t) => t.y));
+      const maxX = Math.max(...members.map((t) => t.x + t.width));
+      const maxY = Math.max(...members.map((t) => t.y + t.height));
+      const box = { x: minX + dx, y: minY + dy, width: maxX - minX, height: maxY - minY };
+      const rest = [...prev.filter((t) => !sel.has(t.id)), ...framesRef.current];
+      const snap = computeDragSnap(box, rest, SNAP_PX / viewRef.current.k);
+      const fdx = dx + (snap.x ?? box.x) - box.x;
+      const fdy = dy + (snap.y ?? box.y) - box.y;
+      setTiles((p) => p.map((t) => (sel.has(t.id) && !t.pinned ? { ...t, x: t.x + fdx, y: t.y + fdy } : t)));
+      return;
+    }
     const cand = { ...moving, x: rawX, y: rawY };
     const others = [...prev.filter((t) => t.id !== id), ...framesRef.current];
     const snap = computeDragSnap(cand, others, SNAP_PX / viewRef.current.k);
@@ -309,9 +332,11 @@ export const useCanvas = ({ seed, onPersist }: UseCanvasArgs) => {
 
   const snapTile = React.useCallback((id: string) => {
     resizeRaw.current = null;
+    const sel = selectedRef.current;
+    const group = sel.has(id) && sel.size > 1 ? sel : new Set([id]);
     setTiles((prev) =>
       prev.map((t) => {
-        if (t.id !== id) return t;
+        if (!group.has(t.id)) return t;
         const x = Math.round(t.x / CELL) * CELL;
         const y = Math.round(t.y / CELL) * CELL;
         const width = Math.max(TILE_MIN_WIDTH, Math.round(t.width / CELL) * CELL);
@@ -393,10 +418,26 @@ export const useCanvas = ({ seed, onPersist }: UseCanvasArgs) => {
     if (!pan && tileId && tileId === activeTile) return;
     if (pan) e.preventDefault();
     (e.currentTarget as Element).setPointerCapture(e.pointerId);
+    if (!pan && !tileId && e.button === 0) {
+      marqueeRef.current = { ox: e.clientX, oy: e.clientY, add: e.shiftKey };
+      return;
+    }
     panRef.current = { ox: e.clientX, oy: e.clientY, vx: view.x, vy: view.y, moved: false, pan, activateId: tileId };
   };
 
   const onBgPointerMove = (e: React.PointerEvent) => {
+    const m = marqueeRef.current;
+    if (m) {
+      const rect = bgRef.current?.getBoundingClientRect();
+      if (!rect) return;
+      setMarquee({
+        x: Math.min(m.ox, e.clientX) - rect.left,
+        y: Math.min(m.oy, e.clientY) - rect.top,
+        width: Math.abs(e.clientX - m.ox),
+        height: Math.abs(e.clientY - m.oy)
+      });
+      return;
+    }
     const p = panRef.current;
     if (!p) return;
     if (!p.moved && Math.hypot(e.clientX - p.ox, e.clientY - p.oy) > 4) p.moved = true;
@@ -404,12 +445,52 @@ export const useCanvas = ({ seed, onPersist }: UseCanvasArgs) => {
   };
 
   const endPan = () => {
+    const m = marqueeRef.current;
+    if (m) {
+      marqueeRef.current = null;
+      const box = marquee;
+      setMarquee(null);
+      if (!box || (box.width < 4 && box.height < 4)) {
+        setActiveTile(null);
+        if (!m.add) setSelected((prev) => (prev.size ? new Set() : prev));
+        return;
+      }
+      const v = viewRef.current;
+      const x1 = (box.x - v.x) / v.k;
+      const y1 = (box.y - v.y) / v.k;
+      const x2 = (box.x + box.width - v.x) / v.k;
+      const y2 = (box.y + box.height - v.y) / v.k;
+      const hits = tilesRef.current
+        .filter((t) => t.x < x2 && t.x + t.width > x1 && t.y < y2 && t.y + t.height > y1)
+        .map((t) => t.id);
+      setSelected((prev) => (m.add ? new Set([...prev, ...hits]) : new Set(hits)));
+      setActiveTile(null);
+      return;
+    }
     const p = panRef.current;
     panRef.current = null;
-    if (p && !p.moved && !p.pan) setActiveTile(p.activateId);
+    if (p && !p.moved && !p.pan) {
+      if (p.activateId && selectedRef.current.has(p.activateId)) return;
+      setActiveTile(p.activateId);
+      if (p.activateId) setSelected((prev) => (prev.size && !prev.has(p.activateId!) ? new Set() : prev));
+    }
   };
 
-  const activateTile = React.useCallback((id: string) => setActiveTile(id), []);
+  const activateTile = React.useCallback((id: string) => {
+    setActiveTile(id);
+    setSelected((prev) => (prev.size && !prev.has(id) ? new Set() : prev));
+  }, []);
+
+  const toggleSelect = React.useCallback((id: string) => {
+    setSelected((prev) => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      return next;
+    });
+  }, []);
+
+  const clearSelection = React.useCallback(() => setSelected((prev) => (prev.size ? new Set() : prev)), []);
 
   const addFrame = React.useCallback((x: number, y: number) => {
     setFrames((prev) => [
@@ -561,6 +642,10 @@ export const useCanvas = ({ seed, onPersist }: UseCanvasArgs) => {
     bgRef,
     frames,
     endPan,
+    marquee,
+    selected,
+    toggleSelect,
+    clearSelection,
     addNote,
     focusTile,
     focusFrame,

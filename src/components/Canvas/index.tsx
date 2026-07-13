@@ -40,6 +40,10 @@ const Canvas = () => {
     bgRef,
     frames,
     endPan,
+    marquee,
+    selected,
+    toggleSelect,
+    clearSelection,
     addNote,
     addTile,
     addCode,
@@ -172,6 +176,15 @@ const Canvas = () => {
     window.addEventListener('keydown', onKey);
     return () => window.removeEventListener('keydown', onKey);
   }, [fsId, exitFs]);
+
+  React.useEffect(() => {
+    if (!selected.size) return;
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') clearSelection();
+    };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, [selected, clearSelection]);
 
   React.useEffect(() => {
     if (fsId && !tiles.some((t) => t.id === fsId)) {
@@ -406,7 +419,9 @@ const Canvas = () => {
               onReveal={revealTilePath}
               onDuplicate={duplicateTile}
               onTogglePin={togglePin}
+              onToggleSelect={toggleSelect}
               active={t.id === activeTile}
+              selected={selected.has(t.id)}
               alert={alerts.get(t.id) ?? null}
               visible={vis}
               live={live}
@@ -433,6 +448,12 @@ const Canvas = () => {
               onRecolor={recolorFrame}
             />
           ))}
+        {marquee && (
+          <div
+            className={styles.marquee}
+            style={{ left: marquee.x, top: marquee.y, width: marquee.width, height: marquee.height }}
+          />
+        )}
         <div ref={indicatorRef} className={styles.indicator}>
           100%
         </div>
