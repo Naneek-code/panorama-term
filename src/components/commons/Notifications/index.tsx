@@ -162,7 +162,12 @@ const NotificationOverlay = () => {
   };
 
   return (
-    <div className={styles.stack} onMouseEnter={expand} onMouseLeave={collapse}>
+    <div
+      className={styles.stack}
+      onMouseEnter={expand}
+      onMouseLeave={collapse}
+      onContextMenu={(e) => e.preventDefault()}
+    >
       {toasts.map((toast, i) => (
         <div
           key={toast.id}
