@@ -1,5 +1,5 @@
 import React from 'react';
-import { Star, Plus, Search, GitBranch, RefreshCw, ChevronRight, ChevronDown, FolderClosed } from 'lucide-react';
+import { Star, Plus, Search, GitBranch, RefreshCw, ArrowUpRight, ChevronRight, ChevronDown, FolderClosed, ArrowDownLeft } from 'lucide-react';
 
 import type { ContextMenuEntry } from '~/components/commons/ContextMenu';
 import type { BranchLeaf, BranchNode, BranchAction, BranchSnapshot } from '~/domain/interfaces/git.interface';
@@ -49,6 +49,7 @@ const BranchMenu = ({ k, cwd, anchor, zIndex, snapshot, loading, error, onClose,
   const [menu, setMenu] = React.useState<MenuState | null>(null);
   const [dialog, setDialog] = React.useState<DialogState | null>(null);
   const [fetching, setFetching] = React.useState(false);
+  const [pending, setPending] = React.useState<'update' | 'push' | null>(null);
   const rootRef = React.useRef<HTMLDivElement>(null);
 
   React.useEffect(() => {
@@ -95,6 +96,16 @@ const BranchMenu = ({ k, cwd, anchor, zIndex, snapshot, loading, error, onClose,
       .catch(() => {})
       .finally(() => setFetching(false));
   };
+
+  const runPending = (kind: 'update' | 'push', task: Promise<BranchSnapshot>) => {
+    setPending(kind);
+    void run(task)
+      .catch(() => {})
+      .finally(() => setPending(null));
+  };
+
+  const updateProject = () => runPending('update', gitUpdateBranch(cwd, false));
+  const pushCurrent = () => runPending('push', gitPushCurrent(cwd));
 
   const create = (name: string, checkout: boolean, overwrite: boolean, startPoint?: string) =>
     run(gitCreateBranch(cwd, name, checkout, overwrite, startPoint));
@@ -322,6 +333,16 @@ const BranchMenu = ({ k, cwd, anchor, zIndex, snapshot, loading, error, onClose,
         <button className={styles.new} onClick={newBranch}>
           <Plus size={13} strokeWidth={2} />
           New branch...
+        </button>
+
+        <button className={styles.new} onClick={updateProject} disabled={pending !== null}>
+          <ArrowDownLeft size={13} strokeWidth={2} />
+          {pending === 'update' ? 'Pulling...' : 'Pull...'}
+        </button>
+
+        <button className={styles.new} onClick={pushCurrent} disabled={pending !== null}>
+          <ArrowUpRight size={13} strokeWidth={2} />
+          {pending === 'push' ? 'Pushing...' : 'Push...'}
         </button>
 
         {error && <div className={styles.error}>{error}</div>}

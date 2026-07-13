@@ -98,6 +98,15 @@
   &:hover {
     background: var(--hover-2);
   }
+
+  &:disabled {
+    opacity: 0.5;
+    cursor: default;
+
+    &:hover {
+      background: transparent;
+    }
+  }
 }
 
 .body {
