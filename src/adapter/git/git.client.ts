@@ -3,6 +3,7 @@ import { invoke } from '@tauri-apps/api/core';
 import type {
   FileDiff,
   CommitInfo,
+  TrackCounts,
   BranchSnapshot,
   StatusSnapshot,
   CommitMessageEntry
@@ -10,6 +11,9 @@ import type {
 
 export const gitBranches = (path: string): Promise<BranchSnapshot> =>
   invoke<BranchSnapshot>('git_branches', { path });
+
+export const gitAheadBehind = (path: string): Promise<TrackCounts> =>
+  invoke<TrackCounts>('git_ahead_behind', { path });
 
 export const gitCheckout = (path: string, branch: string): Promise<BranchSnapshot> =>
   invoke<BranchSnapshot>('git_checkout', { path, branch });

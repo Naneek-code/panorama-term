@@ -357,6 +357,7 @@ pub fn run() {
             store::store_delete,
             store::store_list,
             git::git_branches,
+            git::git_ahead_behind,
             git::git_checkout,
             git::git_fetch,
             git::git_create_branch,

@@ -1,6 +1,6 @@
 import React from 'react';
 import type { Editor } from '@tiptap/react';
-import { X, Pin, PinOff, Copy, Focus, Pencil, Trash2, Maximize, Minimize, RotateCw, CopyPlus, GitBranch, ChevronDown, FolderOpen, ClipboardCopy } from 'lucide-react';
+import { X, Pin, PinOff, Copy, Focus, Pencil, Trash2, ArrowUp, Maximize, Minimize, RotateCw, CopyPlus, ArrowDown, GitBranch, ChevronDown, FolderOpen, ClipboardCopy } from 'lucide-react';
 
 import type { Tile, View } from '~/domain/interfaces/canvas.interface';
 import type { ContextMenuEntry } from '~/components/commons/ContextMenu';
@@ -13,6 +13,7 @@ import ContextMenu from '~/components/commons/ContextMenu';
 import BranchMenu from '~/components/Canvas/TileFrame/BranchMenu';
 import GridTerminal from '~/components/Terminal/GridTerminal';
 import { useBranches } from '~/usecase/hooks/useBranches';
+import { useAheadBehind } from '~/usecase/hooks/useAheadBehind';
 import { stripSpinner, stripStarPrefix, hasSpinnerPrefix } from '~/usecase/util/title';
 import { TILE_GAP, TILE_HEADER } from '~/usecase/util/constants';
 import { getBinding, formatCombo } from '~/usecase/util/keybindings';
@@ -182,6 +183,7 @@ const TileFrame = ({ tile, view, active, selected, alert, visible, live, hidden,
 
   const [branchLocal, setBranchLocal] = React.useState<{ x: number; y: number } | null>(null);
   const branches = useBranches(tile.cwd, branchLocal !== null);
+  const track = useAheadBehind(tile.cwd, tile.branch);
   const snapCurrent = branches.snapshot?.current ?? null;
 
   React.useEffect(() => {
@@ -295,6 +297,16 @@ const TileFrame = ({ tile, view, active, selected, alert, visible, live, hidden,
                 <button className={styles.branch} onClick={openBranches} onPointerDown={stopDrag}>
                   <GitBranch size={10} strokeWidth={2} />
                   {tile.branch}
+                  {track.ahead > 0 && (
+                    <span className={styles.ahead} data-tooltip={`${track.ahead} to push`}>
+                      <ArrowUp size={9} strokeWidth={2.5} />
+                    </span>
+                  )}
+                  {track.behind > 0 && (
+                    <span className={styles.behind} data-tooltip={`${track.behind} to pull`}>
+                      <ArrowDown size={9} strokeWidth={2.5} />
+                    </span>
+                  )}
                   <ChevronDown size={10} strokeWidth={2} />
                 </button>
               )}

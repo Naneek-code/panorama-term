@@ -13,6 +13,11 @@ export interface RemoteBranch {
   is_favorite: boolean;
 }
 
+export interface TrackCounts {
+  ahead: number;
+  behind: number;
+}
+
 export interface BranchSnapshot {
   current: string | null;
   local: LocalBranch[];

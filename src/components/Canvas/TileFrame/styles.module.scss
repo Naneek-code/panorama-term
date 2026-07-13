@@ -124,6 +124,21 @@
   }
 }
 
+.ahead,
+.behind {
+  display: flex;
+  flex: none;
+  align-items: center;
+}
+
+.ahead {
+  color: #5fb872;
+}
+
+.behind {
+  color: var(--accent);
+}
+
 .alertDot {
   flex-shrink: 0;
   width: 7px;

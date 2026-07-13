@@ -493,6 +493,26 @@ pub fn git_unpushed_commits(path: String) -> Result<Vec<CommitMessageEntry>, Str
     Ok(parse_commit_entries(&out))
 }
 
+#[derive(Serialize)]
+pub struct TrackCounts {
+    ahead: u32,
+    behind: u32,
+}
+
+#[tauri::command]
+pub fn git_ahead_behind(path: String) -> TrackCounts {
+    let (ahead, behind) = run_git(&path, &["rev-list", "--left-right", "--count", "@{upstream}...HEAD"])
+        .ok()
+        .and_then(|out| {
+            let mut it = out.split_whitespace();
+            let behind = it.next()?.parse().ok()?;
+            let ahead = it.next()?.parse().ok()?;
+            Some((ahead, behind))
+        })
+        .unwrap_or((0, 0));
+    TrackCounts { ahead, behind }
+}
+
 #[tauri::command]
 pub fn git_branches(path: String) -> Result<BranchSnapshot, String> {
     snapshot(&path)
