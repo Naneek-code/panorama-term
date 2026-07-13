@@ -15,7 +15,7 @@ import {
   Strikethrough
 } from 'lucide-react';
 
-import { NOTE_PALETTE } from '~/usecase/util/note';
+import { NOTE_PALETTE, noteTheme } from '~/usecase/util/note';
 
 import styles from './styles.module.scss';
 
@@ -59,7 +59,7 @@ const NoteToolbar = ({ editor, color, onColor }: NoteToolbarProps) => {
           <button
             key={c.body}
             className={color.toLowerCase() === c.body.toLowerCase() ? `${styles.swatch} ${styles.active}` : styles.swatch}
-            style={{ background: c.body }}
+            style={{ background: noteTheme(c.body).body }}
             onMouseDown={(e) => e.preventDefault()}
             onClick={() => onColor(c.body)}
             aria-label={`Color ${c.body}`}

@@ -6,7 +6,7 @@ import { TaskList, TaskItem } from '@tiptap/extension-list';
 import { useEditor, EditorContent, type Editor } from '@tiptap/react';
 
 import type { Tile } from '~/domain/interfaces/canvas.interface';
-import { noteTextColor, NOTE_DEFAULT_COLOR } from '~/usecase/util/note';
+import { noteTheme } from '~/usecase/util/note';
 
 import styles from './styles.module.scss';
 import './content.scss';
@@ -60,6 +60,7 @@ const NoteTile = ({ tile, active, onChange, onActivate, onEditor }: NoteTileProp
     if (active) e.stopPropagation();
   };
 
+  const tint = noteTheme(tile.color);
   const editorCls = active ? `${styles.editor} ${styles.scrollable}` : styles.editor;
 
   return (
@@ -68,8 +69,8 @@ const NoteTile = ({ tile, active, onChange, onActivate, onEditor }: NoteTileProp
       onWheel={stopWheel}
       onPointerDown={activate}
       style={{
-        ['--note-body' as string]: tile.color || NOTE_DEFAULT_COLOR,
-        ['--note-text' as string]: noteTextColor(tile.color || NOTE_DEFAULT_COLOR)
+        ['--note-body' as string]: tint.body,
+        ['--note-text' as string]: tint.text
       }}
     >
       <EditorContent editor={editor} className={editorCls} />

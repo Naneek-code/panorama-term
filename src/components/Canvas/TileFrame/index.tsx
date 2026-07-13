@@ -7,7 +7,7 @@ import type { ContextMenuEntry } from '~/components/commons/ContextMenu';
 import type { NotifyKind } from '~/components/commons/Notifications/bridge';
 import NoteTile from '~/components/Canvas/NoteTile';
 import DiffViewer from '~/components/DiffViewer';
-import { noteTextColor } from '~/usecase/util/note';
+import { noteTheme } from '~/usecase/util/note';
 import ClaudeLogo from '~/components/commons/ClaudeLogo';
 import ContextMenu from '~/components/commons/ContextMenu';
 import BranchMenu from '~/components/Canvas/TileFrame/BranchMenu';
@@ -124,7 +124,8 @@ const TileFrame = ({ tile, view, active, alert, visible, live, hidden, fullscree
 
   const note = tile.type === 'note';
   const code = tile.type === 'code';
-  const noteTint = note ? { background: tile.color, color: noteTextColor(tile.color || '#fef8c4') } : null;
+  const tint = note ? noteTheme(tile.color) : null;
+  const noteTint = tint ? { background: tint.body, color: tint.text } : null;
   const noteLabel = note ? tile.userTitle?.trim() || 'Note' : null;
   const copyNote = () => onCopyNote(tile.id);
   const stopDrag = (e: React.PointerEvent) => e.stopPropagation();

@@ -24,6 +24,7 @@
 }
 
 :root {
+  color-scheme: dark;
   --font-mono: 'JetBrains Mono', ui-monospace, monospace;
   --tile-alpha: 62%;
   --tile-chrome-alpha: 90%;
@@ -62,6 +63,7 @@
 }
 
 :root[data-theme='light'] {
+  color-scheme: light;
   --surface-1: #f8f8f8;
   --surface-2: #f0f0f0;
   --surface-3: #f4f4f4;
