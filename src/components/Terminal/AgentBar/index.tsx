@@ -7,7 +7,7 @@ import ClaudeLogo from '~/components/commons/ClaudeLogo';
 import { AntigravityLogo, CodexLogo, OpenCodeLogo, GenericAgentLogo } from '~/components/commons/AgentIcons';
 import { writeTempImage } from '~/adapter/clipboard/clipboard.client';
 import { readFooter, modeKey, prettyMode, prettyModel, detectAgent, type AgentType, detectExitBanner, parseStatusLines, detectSuggestTrigger } from './parse';
-import { BPM_END, draftKey, BPM_START, HISTORY_KEY, EFFORT_LEVELS, CLAUDE_MODELS, CLAUDE_SLASH_COMMANDS, MODEL_QUICK_SWITCHES } from './constants';
+import { BPM_END, draftKey, BPM_START, HISTORY_KEY, EFFORT_LEVELS, CLAUDE_MODELS, CLAUDE_SLASH_COMMANDS, ANTIGRAVITY_SLASH_COMMANDS, MODEL_QUICK_SWITCHES } from './constants';
 import { cloneDraft, removeChip, EMPTY_DRAFT, partsToDraft, draftToParts, isDraftEmpty, renderEditor, replaceEditor, getCaretOffset, setCaretOffset, serializeEditor, placeCaretAtEnd, consolidateParts, draftToSendParts, insertPartsAtCaret, isCaretOnLastLine, isCaretOnFirstLine } from './editor';
 
 import type { ClaudeState } from '~/domain/interfaces/pty.interface';
@@ -567,9 +567,14 @@ const AgentBar = ({ tileId, active, send, getLines, getStructured, focusTerminal
   };
 
   const fetchSlash = React.useCallback((query: string): PromptSuggestion[] => {
-    if (agentType !== 'claude') return [];
     const q = query.toLowerCase();
-    return CLAUDE_SLASH_COMMANDS.filter(
+    const source = agentType === 'claude'
+      ? CLAUDE_SLASH_COMMANDS
+      : agentType === 'antigravity'
+        ? ANTIGRAVITY_SLASH_COMMANDS
+        : [];
+        
+    return source.filter(
       (c) =>
         c.name.includes(q) ||
         c.desc.toLowerCase().includes(q) ||
@@ -581,7 +586,7 @@ const AgentBar = ({ tileId, active, send, getLines, getStructured, focusTerminal
       icon: 'cmd',
       takesArg: c.takesArg
     }));
-  }, []);
+  }, [agentType]);
 
   const fetchModels = React.useCallback((query: string): PromptSuggestion[] => {
     const q = query.toLowerCase();
@@ -603,13 +608,14 @@ const AgentBar = ({ tileId, active, send, getLines, getStructured, focusTerminal
 
   const onSlashSelect = (item: PromptSuggestion, submit?: boolean) => {
     const name = item.display;
-    const noSubmit = name === '/model' || item.takesArg === true;
+    const isClaude = agentType === 'claude';
+    const noSubmit = (name === '/model' && isClaude) || (name === '/effort' && isClaude) || item.takesArg === true;
     const doSubmit = submit && !noSubmit;
     const next = { text: name + (doSubmit ? '' : ' '), images: [] };
     setDraft(next);
     commitDraft(next);
-    if (name === '/model') setSuggest({ kind: 'model', query: '' });
-    else if (name === '/effort') setSuggest({ kind: 'effort', query: '' });
+    if (name === '/model' && isClaude) setSuggest({ kind: 'model', query: '' });
+    else if (name === '/effort' && isClaude) setSuggest({ kind: 'effort', query: '' });
     else setSuggest(null);
     if (doSubmit) void handleSend();
   };
