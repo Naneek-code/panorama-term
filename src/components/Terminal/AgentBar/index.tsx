@@ -107,9 +107,11 @@ const AgentBar = ({ tileId, active, send, getLines, getStructured, focusTerminal
   const lastSeenRef = React.useRef(0);
   const barOpenRef = React.useRef<boolean | null>(null);
   const activeRef = React.useRef(active);
+  const agentTypeRef = React.useRef<AgentType | null>(null);
   historyRef.current = history;
   draftRef.current = draft;
   activeRef.current = active;
+  agentTypeRef.current = agentType;
 
   const isEmpty = isDraftEmpty(draft);
   const hidden = questionMode || manualHide;
@@ -209,21 +211,43 @@ const AgentBar = ({ tileId, active, send, getLines, getStructured, focusTerminal
 
     const scan = () => {
       const lines = getLines();
-      const detected = detectAgent(lines.slice(-25).join('\n'));
+      const bufferText = lines.slice(-25).join('\n');
+      const detected = detectAgent(bufferText);
       const now = Date.now();
+      const currentType = seenRef.current ? agentTypeRef.current : null;
+
       if (detected) {
         lastSeenRef.current = now;
-        // If we already have a specific agent detected, don't let it downgrade to 'generic'
-        const currentType = seenRef.current ? agentType : null;
-        const isDowngradeToGeneric = detected === 'generic' && currentType && currentType !== 'generic';
+        const isSpecific = (type: AgentType | null) => type && type !== 'generic';
         
-        if (!seenRef.current || (!isDowngradeToGeneric && detected !== currentType)) {
-          seenRef.current = true;
-          setAgentType(detected);
+        if (isSpecific(detected)) {
+          if (!seenRef.current || detected !== currentType) {
+            seenRef.current = true;
+            setAgentType(detected);
+          }
+        } else if (detected === 'generic') {
+          if (!seenRef.current || currentType === 'generic') {
+            seenRef.current = true;
+            setAgentType('generic');
+          }
         }
-      } else if (seenRef.current && now - lastSeenRef.current > GONE_MS) {
-        seenRef.current = false;
-        setAgentType(null);
+      } else {
+        const isSpecific = (type: AgentType | null) => type && type !== 'generic';
+        
+        if (seenRef.current) {
+          if (isSpecific(currentType)) {
+            // Specific agents don't expire from simple inactivity (GONE_MS)
+            // But we clean them up if we parse a shell prompt return or exit banner indicators
+            const isExiting = detectExitBanner(lines) || /exiting/i.test(bufferText);
+            if (isExiting) {
+              seenRef.current = false;
+              setAgentType(null);
+            }
+          } else if (now - lastSeenRef.current > GONE_MS) {
+            seenRef.current = false;
+            setAgentType(null);
+          }
+        }
       }
       if (!seenRef.current) return;
 
