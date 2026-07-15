@@ -73,6 +73,14 @@ interface NavigatorProps {
 
 const WIDTH_KEY = 'panorama:navWidth';
 const COLLAPSED_KEY = 'panorama:navCollapsed';
+const TAB_KEY = 'panorama:navTab';
+const TABS = ['files', 'tiles', 'git', 'docker'] as const;
+type Tab = (typeof TABS)[number];
+
+const savedTab = (): Tab => {
+  const raw = localStorage.getItem(TAB_KEY);
+  return TABS.includes(raw as Tab) ? (raw as Tab) : 'files';
+};
 const MIN_WIDTH = 200;
 const MAX_WIDTH = 560;
 
@@ -104,13 +112,20 @@ const Navigator = ({
   onOpenDiff,
   onClose
 }: NavigatorProps) => {
-  const [tab, setTab] = React.useState<'files' | 'tiles' | 'git' | 'docker'>('files');
+  const [tab, setTab] = React.useState<Tab>(savedTab);
   const [hasDocker, setHasDocker] = React.useState(false);
+
+  React.useEffect(() => {
+    localStorage.setItem(TAB_KEY, tab);
+  }, [tab]);
   const [width, setWidth] = React.useState(savedWidth);
 
   React.useEffect(() => {
     dockerAvailable()
-      .then(setHasDocker)
+      .then((ok) => {
+        setHasDocker(ok);
+        if (!ok) setTab((t) => (t === 'docker' ? 'files' : t));
+      })
       .catch(() => setHasDocker(false));
   }, []);
   const [query, setQuery] = React.useState('');
