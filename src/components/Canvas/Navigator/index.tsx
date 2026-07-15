@@ -29,6 +29,7 @@ import type { NotifyKind } from '~/components/commons/Notifications/bridge';
 import GitTab from '~/components/Canvas/Navigator/GitTab';
 import FileTree from '~/components/Canvas/Navigator/FileTree';
 import DockerTab from '~/components/Canvas/Navigator/DockerTab';
+import ClaudeLogo from '~/components/commons/ClaudeLogo';
 import ContextMenu from '~/components/commons/ContextMenu';
 import { tileLabel } from '~/usecase/util/title';
 import { groupByFrame } from '~/usecase/util/frame';
@@ -60,6 +61,7 @@ interface NavigatorProps {
   frames: Frame[];
   activeTile: string | null;
   alerts: Map<string, NotifyKind>;
+  agents: Map<string, 'idle' | 'busy'>;
   onNewTile: () => void;
   onFocusTile: (id: string, zoomToMax?: boolean) => void;
   onFocusFrame: (id: string) => void;
@@ -102,6 +104,7 @@ const Navigator = ({
   frames,
   activeTile,
   alerts,
+  agents,
   onNewTile,
   onFocusTile,
   onFocusFrame,
@@ -248,6 +251,7 @@ const Navigator = ({
 
   const row = (tile: Tile, nested: boolean) => {
     const { Icon, color } = TYPE_ICON[tile.type] ?? TYPE_ICON.term;
+    const agent = agents.get(tile.id);
     const select = () => onFocusTile(tile.id);
     const zoom = () => onFocusTile(tile.id, true);
     const contextMenu = (e: React.MouseEvent) => openTileMenu(e, tile);
@@ -277,6 +281,19 @@ const Navigator = ({
           <span className={styles.name}>{tileLabel(tile)}</span>
         )}
         {alerts.has(tile.id) && <span className={styles.dot} />}
+        {agent && (
+          <span className={styles.agent} data-tooltip={agent === 'busy' ? 'Agent working' : 'Agent idle'}>
+            {agent === 'busy' ? (
+              <span className={styles.dots}>
+                <span />
+                <span />
+                <span />
+              </span>
+            ) : (
+              <ClaudeLogo size={11} />
+            )}
+          </span>
+        )}
       </div>
     );
   };
@@ -382,6 +399,11 @@ const Navigator = ({
               const children = (members.get(frame.id) ?? []).filter(matches);
               const shut = collapsed.has(frame.id);
               const alerted = children.some((c) => alerts.has(c.id));
+              const frameAgent = children.some((c) => agents.get(c.id) === 'busy')
+                ? 'busy'
+                : children.some((c) => agents.get(c.id))
+                  ? 'idle'
+                  : null;
               const toggle = () => toggleFrame(frame.id);
               const goto = (e: React.MouseEvent) => {
                 e.stopPropagation();
@@ -395,6 +417,19 @@ const Navigator = ({
                     <span className={styles.swatch} style={{ background: frame.color }} />
                     <span className={styles.name}>{frame.title}</span>
                     {alerted && <span className={styles.dot} />}
+                    {frameAgent && (
+                      <span className={styles.agent} data-tooltip={frameAgent === 'busy' ? 'Agent working' : 'Agent idle'}>
+                        {frameAgent === 'busy' ? (
+                          <span className={styles.dots}>
+                            <span />
+                            <span />
+                            <span />
+                          </span>
+                        ) : (
+                          <ClaudeLogo size={11} />
+                        )}
+                      </span>
+                    )}
                     <span className={styles.count}>{children.length}</span>
                     <button className={styles.goto} onClick={goto} aria-label="Go to frame">
                       <Crosshair size={12} strokeWidth={2} />

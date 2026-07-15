@@ -42,6 +42,7 @@ interface TileFrameProps {
   onMove: (id: string, dx: number, dy: number) => void;
   onResize: (id: string, dir: string, dx: number, dy: number) => void;
   onCwd: (id: string, cwd: string, branch?: string) => void;
+  onAgentState: (id: string, live: boolean, busy: boolean) => void;
   onOscTitle: (id: string, title: string) => void;
   onNoteChange: (id: string, content: string) => void;
   onNoteEditor: (id: string, editor: EditorView | null) => void;
@@ -76,7 +77,7 @@ const devicePx = (v: number): number => {
   return Math.round(v * dpr) / dpr;
 };
 
-const TileFrame = ({ tile, view, active, selected, alert, visible, live, hidden, fullscreen, exiting, vpW, vpH, onMove, onSnap, onClose, onResize, onActivate, onFocusTile, onToggleFullscreen, onCwd, onOscTitle, onNoteChange, onNoteEditor, onNoteTitle, onCopyNote, onCopyNoteSelection, onPasteNote, onToggleRaw, onRename, onCopyPath, onReveal, onDuplicate, onTogglePin, onToggleSelect, wsId, linkActive, linkTarget, linkedTerms, onLink, onUnlink, onLinkDragStart }: TileFrameProps) => {
+const TileFrame = ({ tile, view, active, selected, alert, visible, live, hidden, fullscreen, exiting, vpW, vpH, onMove, onSnap, onClose, onResize, onActivate, onFocusTile, onToggleFullscreen, onCwd, onAgentState, onOscTitle, onNoteChange, onNoteEditor, onNoteTitle, onCopyNote, onCopyNoteSelection, onPasteNote, onToggleRaw, onRename, onCopyPath, onReveal, onDuplicate, onTogglePin, onToggleSelect, wsId, linkActive, linkTarget, linkedTerms, onLink, onUnlink, onLinkDragStart }: TileFrameProps) => {
   const k = view.k;
   const drag = React.useRef<{ sx: number; sy: number; ox: number; oy: number; pid: number; on: boolean } | null>(null);
   const resize = React.useRef<{ x: number; y: number; dir: string } | null>(null);
@@ -85,6 +86,10 @@ const TileFrame = ({ tile, view, active, selected, alert, visible, live, hidden,
   const [progress, setProgress] = React.useState<{ state: number; pct: number } | null>(null);
   const [diff, setDiff] = React.useState<{ a: number; r: number } | null>(null);
   const onClaudeStatus = (s: string) => setClaudeBusy(s === 'busy');
+  React.useEffect(() => {
+    onAgentState(tile.id, claudeLive, claudeBusy);
+  }, [tile.id, claudeLive, claudeBusy, onAgentState]);
+  React.useEffect(() => () => onAgentState(tile.id, false, false), [tile.id, onAgentState]);
   const onClaudeDiff = (a: number, r: number) => setDiff(a || r ? { a, r } : null);
   const onProgress = (state: number, pct: number) => setProgress(state === 0 || state === 3 ? null : { state, pct });
 

@@ -97,6 +97,7 @@ const Canvas = () => {
 
   const [menu, setMenu] = React.useState<Menu | null>(null);
   const [alerts, setAlerts] = React.useState<Map<string, NotifyKind>>(loadAlerts);
+  const [agents, setAgents] = React.useState<Map<string, 'idle' | 'busy'>>(new Map());
   const [noteEditors, setNoteEditors] = React.useState<Record<string, EditorView>>({});
   const [size, setSize] = React.useState({ w: window.innerWidth, h: window.innerHeight });
   const [fsId, setFsId] = React.useState<string | null>(null);
@@ -419,6 +420,17 @@ const Canvas = () => {
     });
   }, []);
 
+  const setAgentState = React.useCallback((id: string, live: boolean, busy: boolean) => {
+    setAgents((prev) => {
+      const next = live ? (busy ? 'busy' : 'idle') : undefined;
+      if (prev.get(id) === next) return prev;
+      const m = new Map(prev);
+      if (next) m.set(id, next);
+      else m.delete(id);
+      return m;
+    });
+  }, []);
+
   const clearAlert = React.useCallback((id: string) => {
     setAlerts((prev) => {
       if (!prev.has(id)) return prev;
@@ -590,6 +602,7 @@ const Canvas = () => {
               onFocusTile={focusTile}
               onToggleFullscreen={toggleFs}
               onCwd={setTileCwd}
+              onAgentState={setAgentState}
               onOscTitle={setTileOscTitle}
               onNoteChange={setNoteContent}
               onNoteEditor={registerEditor}
@@ -650,6 +663,7 @@ const Canvas = () => {
           tiles={tiles}
           frames={frames}
           alerts={alerts}
+          agents={agents}
           activeTile={activeTile}
           onNewTile={addTile}
           onFocusTile={navFocus}
