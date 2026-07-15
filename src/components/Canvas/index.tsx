@@ -101,7 +101,11 @@ const Canvas = () => {
   const [size, setSize] = React.useState({ w: window.innerWidth, h: window.innerHeight });
   const [fsId, setFsId] = React.useState<string | null>(null);
   const [fsExit, setFsExit] = React.useState(false);
-  const [navOpen, setNavOpen] = React.useState(false);
+  const [navOpen, setNavOpen] = React.useState(() => localStorage.getItem('panorama:navOpen') === '1');
+  React.useEffect(() => {
+    localStorage.setItem('panorama:navOpen', navOpen ? '1' : '0');
+  }, [navOpen]);
+
   const [diff, setDiff] = React.useState<{ root: string; file: string } | null>(null);
   const [diffFiles, setDiffFiles] = React.useState<string[]>([]);
   const [diffExit, setDiffExit] = React.useState(false);
