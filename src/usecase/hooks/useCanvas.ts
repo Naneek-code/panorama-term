@@ -399,8 +399,6 @@ export const useCanvas = ({ seed, onPersist }: UseCanvasArgs) => {
   }, []);
 
   const onWheel = (e: React.WheelEvent) => {
-    const tileEl = (e.target as Element).closest('[data-tile]');
-    if (tileEl && tileEl.getAttribute('data-tile') === activeTile) return;
     if (e.shiftKey) {
       setView((v) => ({ ...v, x: v.x - (e.deltaX || e.deltaY) * 1.2 }));
       return;
@@ -409,6 +407,8 @@ export const useCanvas = ({ seed, onPersist }: UseCanvasArgs) => {
       setView((v) => ({ ...v, x: v.x - e.deltaX * 1.2, y: v.y - e.deltaY * 1.2 }));
       return;
     }
+    const tileEl = (e.target as Element).closest('[data-tile]');
+    if (tileEl && tileEl.getAttribute('data-tile') === activeTile) return;
     cancelAnimationFrame(snapRaf.current);
     snapRaf.current = 0;
     clearTimeout(snapTimer.current);

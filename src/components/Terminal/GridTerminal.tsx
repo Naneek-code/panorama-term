@@ -533,7 +533,7 @@ const GridTerminal = ({ tileId, cwd, cols, rows, active, visible, k, restartKey,
         return;
       }
     }
-    if (ws && frame && frame.mouseMode > 0 && !e.shiftKey) {
+    if (ws && frame && frame.mouseMode > 0 && !e.shiftKey && e.button !== 1) {
       e.stopPropagation();
       canvasRef.current?.setPointerCapture(e.pointerId);
       mouseFwdRef.current = true;
