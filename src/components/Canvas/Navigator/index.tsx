@@ -72,12 +72,21 @@ interface NavigatorProps {
 }
 
 const WIDTH_KEY = 'panorama:navWidth';
+const COLLAPSED_KEY = 'panorama:navCollapsed';
 const MIN_WIDTH = 200;
 const MAX_WIDTH = 560;
 
 const savedWidth = (): number => {
   const raw = Number(localStorage.getItem(WIDTH_KEY));
   return raw >= MIN_WIDTH && raw <= MAX_WIDTH ? raw : 248;
+};
+
+const savedCollapsed = (): Set<string> => {
+  try {
+    return new Set(JSON.parse(localStorage.getItem(COLLAPSED_KEY) ?? '[]'));
+  } catch {
+    return new Set();
+  }
 };
 
 const Navigator = ({
@@ -105,7 +114,7 @@ const Navigator = ({
       .catch(() => setHasDocker(false));
   }, []);
   const [query, setQuery] = React.useState('');
-  const [collapsed, setCollapsed] = React.useState<Set<string>>(() => new Set());
+  const [collapsed, setCollapsed] = React.useState<Set<string>>(savedCollapsed);
   const [renaming, setRenaming] = React.useState<string | null>(null);
   const [draft, setDraft] = React.useState('');
   const [menu, setMenu] = React.useState<Menu | null>(null);
@@ -140,6 +149,7 @@ const Navigator = ({
       const next = new Set(prev);
       if (next.has(id)) next.delete(id);
       else next.add(id);
+      localStorage.setItem(COLLAPSED_KEY, JSON.stringify([...next]));
       return next;
     });
   };
