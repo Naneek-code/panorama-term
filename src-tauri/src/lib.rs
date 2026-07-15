@@ -166,8 +166,8 @@ fn notif_layout(app: tauri::AppHandle, height: f64) -> Result<(), String> {
 
     if !win.is_visible().map_err(|e| e.to_string())? {
         win.show().map_err(|e| e.to_string())?;
-        win.set_always_on_top(true).map_err(|e| e.to_string())?;
     }
+    win.set_always_on_top(true).map_err(|e| e.to_string())?;
     Ok(())
 }
 
@@ -353,8 +353,19 @@ pub fn run() {
             Ok(())
         })
         .on_window_event(|window, event| {
-            if window.label() == "main" && matches!(event, tauri::WindowEvent::Destroyed) {
-                window.app_handle().exit(0);
+            if window.label() != "main" {
+                return;
+            }
+            match event {
+                tauri::WindowEvent::Destroyed => window.app_handle().exit(0),
+                tauri::WindowEvent::Focused(true) => {
+                    if let Some(notif) = window.app_handle().get_webview_window("notif") {
+                        if notif.is_visible().unwrap_or(false) {
+                            let _ = notif.set_always_on_top(true);
+                        }
+                    }
+                }
+                _ => {}
             }
         })
         .invoke_handler(tauri::generate_handler![
