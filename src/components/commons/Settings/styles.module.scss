@@ -11,7 +11,7 @@
 .panel {
   display: flex;
   width: 640px;
-  height: 440px;
+  height: min(620px, 88vh);
   overflow: hidden;
   border: 1px solid var(--border-1);
   border-radius: 12px;
@@ -71,7 +71,24 @@
 .content {
   position: relative;
   flex: 1;
-  overflow: auto;
+  overflow-y: auto;
+  scrollbar-width: thin;
+  scrollbar-color: var(--border-3) transparent;
+
+  &::-webkit-scrollbar {
+    width: 10px;
+  }
+
+  &::-webkit-scrollbar-thumb {
+    border: 3px solid transparent;
+    border-radius: 8px;
+    background-clip: padding-box;
+    background-color: var(--border-3);
+  }
+
+  &::-webkit-scrollbar-thumb:hover {
+    background-color: var(--text-dim);
+  }
 }
 
 .close {
