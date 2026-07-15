@@ -14,6 +14,9 @@ import DiffViewer from '~/components/DiffViewer';
 import NoteToolbar from '~/components/Canvas/NoteToolbar';
 import ContextMenu from '~/components/commons/ContextMenu';
 import { useCanvas } from '~/usecase/hooks/useCanvas';
+import { writeNote } from '~/adapter/notes/notes.client';
+import { applyFrontTitle } from '~/usecase/util/noteMeta';
+import { adjacentTerm, termName, flowPath } from '~/usecase/util/noteLink';
 import { useWorkspace } from '~/usecase/context/WorkspaceContext';
 import { useNotifyBridge, type NotifyKind } from '~/components/commons/Notifications/bridge';
 import { TILE_GAP, CULL_MARGIN, MIN_LIVE_WIDTH } from '~/usecase/util/constants';
@@ -23,6 +26,16 @@ import styles from './styles.module.scss';
 
 const FS_ANIM = 170;
 const DIFF_ANIM = 130;
+const ALERTS_KEY = 'panorama:alerts';
+
+const loadAlerts = (): Map<string, NotifyKind> => {
+  try {
+    const raw = localStorage.getItem(ALERTS_KEY);
+    return raw ? new Map(Object.entries(JSON.parse(raw) as Record<string, NotifyKind>)) : new Map();
+  } catch {
+    return new Map();
+  }
+};
 
 interface Menu {
   sx: number;
@@ -32,7 +45,7 @@ interface Menu {
 }
 
 const Canvas = () => {
-  const { activeState, saveActiveState } = useWorkspace();
+  const { activeId, activeState, saveActiveState } = useWorkspace();
   const {
     view,
     tiles,
@@ -57,6 +70,8 @@ const Canvas = () => {
     onWheel,
     moveTile,
     snapTile,
+    linkNoteTo,
+    unlinkNoteFrom,
     dragFrame,
     closeTile,
     snapFrame,
@@ -76,10 +91,10 @@ const Canvas = () => {
     indicatorRef,
     onBgPointerMove,
     onBgPointerDown
-  } = useCanvas({ seed: activeState, onPersist: saveActiveState });
+  } = useCanvas({ seed: activeState, wsId: activeId, onPersist: saveActiveState });
 
   const [menu, setMenu] = React.useState<Menu | null>(null);
-  const [alerts, setAlerts] = React.useState<Map<string, NotifyKind>>(() => new Map());
+  const [alerts, setAlerts] = React.useState<Map<string, NotifyKind>>(loadAlerts);
   const [noteEditors, setNoteEditors] = React.useState<Record<string, EditorView>>({});
   const [size, setSize] = React.useState({ w: window.innerWidth, h: window.innerHeight });
   const [fsId, setFsId] = React.useState<string | null>(null);
@@ -95,6 +110,43 @@ const Canvas = () => {
   activeTileRef.current = activeTile;
   const fsTimer = React.useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
   const activated = React.useRef<Set<string>>(new Set());
+
+  const [linkDrag, setLinkDrag] = React.useState<{ noteId: string; x: number; y: number; over: string | null } | null>(null);
+  const viewR = React.useRef(view);
+  viewR.current = view;
+  const tilesR = React.useRef(tiles);
+  tilesR.current = tiles;
+  const dragId = linkDrag?.noteId ?? null;
+
+  const startLinkDrag = React.useCallback((noteId: string, e: React.PointerEvent) => {
+    e.stopPropagation();
+    e.preventDefault();
+    setLinkDrag({ noteId, x: e.clientX, y: e.clientY, over: null });
+  }, []);
+
+  React.useEffect(() => {
+    if (!dragId) return;
+    const move = (e: PointerEvent) => {
+      const v = viewR.current;
+      const wx = (e.clientX - v.x) / v.k;
+      const wy = (e.clientY - v.y) / v.k;
+      const term = tilesR.current.find(
+        (t) => t.type === 'term' && wx >= t.x && wx <= t.x + t.width && wy >= t.y && wy <= t.y + t.height
+      );
+      setLinkDrag((d) => (d ? { ...d, x: e.clientX, y: e.clientY, over: term?.id ?? null } : d));
+    };
+    const up = () =>
+      setLinkDrag((d) => {
+        if (d?.over) linkNoteTo(d.noteId, d.over);
+        return null;
+      });
+    window.addEventListener('pointermove', move);
+    window.addEventListener('pointerup', up);
+    return () => {
+      window.removeEventListener('pointermove', move);
+      window.removeEventListener('pointerup', up);
+    };
+  }, [dragId, linkNoteTo]);
 
   React.useEffect(() => {
     const onResize = () => setSize({ w: window.innerWidth, h: window.innerHeight });
@@ -265,7 +317,13 @@ const Canvas = () => {
 
   const setNoteContent = (id: string, content: string) => patchTile(id, { content });
   const setNoteColor = (id: string, color: string) => patchTile(id, { color });
-  const setNoteTitle = (id: string, title: string) => patchTile(id, { userTitle: title });
+  const setNoteTitle = (id: string, title: string) => {
+    const t = tiles.find((x) => x.id === id);
+    if (!t) return;
+    const next = applyFrontTitle(t.content || '', title);
+    patchTile(id, { content: next });
+    if (activeId) void writeNote(activeId, id, next).catch(() => {});
+  };
   const setTileTitle = (id: string, title: string) => patchTile(id, { userTitle: title || undefined });
   const togglePin = (id: string) => patchTile(id, { pinned: !tiles.find((t) => t.id === id)?.pinned });
   const toggleNoteRaw = (id: string) => {
@@ -399,6 +457,7 @@ const Canvas = () => {
 
   React.useEffect(() => {
     void invoke('set_pending_count', { count: alerts.size }).catch(() => {});
+    localStorage.setItem(ALERTS_KEY, JSON.stringify(Object.fromEntries(alerts)));
   }, [alerts]);
 
   return (
@@ -414,6 +473,53 @@ const Canvas = () => {
         onPointerCancel={endPan}
       >
         <canvas ref={gridRef} className={styles.grid} />
+        {!fsId && (
+          <svg className={styles.links} width={size.w} height={size.h}>
+            {tiles.map((t) => {
+              if (t.type !== 'note' || !t.linkedTo?.length) return null;
+              const noteRect = { x: t.x * view.k + view.x, y: t.y * view.k + view.y, width: t.width * view.k, height: t.height * view.k };
+              return t.linkedTo.map((termId) => {
+                const term = tiles.find((x) => x.id === termId);
+                if (!term) return null;
+                const termRect = { x: term.x * view.k + view.x, y: term.y * view.k + view.y, width: term.width * view.k, height: term.height * view.k };
+                const d = flowPath(noteRect, termRect);
+                const removeLink = (e: React.PointerEvent) => {
+                  e.stopPropagation();
+                  unlinkNoteFrom(t.id, termId);
+                };
+                return (
+                  <g key={`${t.id}-${termId}`} className={styles.linkGroup} onPointerDown={removeLink}>
+                    <path d={d} className={styles.linkHit} />
+                    <path d={d} className={styles.linkLine} />
+                  </g>
+                );
+              });
+            })}
+            {linkDrag &&
+              (() => {
+                const note = tiles.find((x) => x.id === linkDrag.noteId);
+                if (!note) return null;
+                const noteRect = { x: note.x * view.k + view.x, y: note.y * view.k + view.y, width: note.width * view.k, height: note.height * view.k };
+                const d = flowPath(noteRect, { x: linkDrag.x, y: linkDrag.y, width: 0, height: 0 });
+                return <path d={d} className={styles.linkLine} />;
+              })()}
+            {linkDrag?.over &&
+              (() => {
+                const term = tiles.find((x) => x.id === linkDrag.over);
+                if (!term) return null;
+                return (
+                  <rect
+                    x={term.x * view.k + view.x}
+                    y={term.y * view.k + view.y}
+                    width={term.width * view.k}
+                    height={term.height * view.k}
+                    rx={10}
+                    className={styles.linkHover}
+                  />
+                );
+              })()}
+          </svg>
+        )}
         {!fsId &&
           frames.map((f) => (
             <Frame key={f.id} frame={f} view={view} onSnap={snapFrame} onResize={resizeFrame} />
@@ -422,11 +528,26 @@ const Canvas = () => {
           const vis = isVisible(t);
           if (vis && (t.width - TILE_GAP) * view.k >= MIN_LIVE_WIDTH) activated.current.add(t.id);
           const live = activated.current.has(t.id);
+          const linkedIds = t.type === 'note' ? t.linkedTo ?? [] : [];
+          const linkActive = linkedIds.some((id) => id === activeTile || selected.has(id));
+          const cand = t.type === 'note' ? adjacentTerm(t, tiles) : null;
+          const linkCand = cand && !linkedIds.includes(cand.id) ? cand : null;
+          const linkedTerms = linkedIds
+            .map((id) => tiles.find((x) => x.id === id))
+            .filter((x): x is typeof tiles[number] => Boolean(x))
+            .map((term) => ({ id: term.id, name: termName(term) }));
           return (
             <TileFrame
               key={t.id}
               tile={t}
               view={view}
+              wsId={activeId}
+              linkActive={linkActive}
+              linkTarget={linkCand ? { id: linkCand.id, name: termName(linkCand) } : null}
+              linkedTerms={linkedTerms}
+              onLink={linkNoteTo}
+              onUnlink={unlinkNoteFrom}
+              onLinkDragStart={startLinkDrag}
               onMove={moveTile}
               onSnap={snapTile}
               onClose={closeTile}

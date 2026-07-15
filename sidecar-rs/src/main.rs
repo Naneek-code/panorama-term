@@ -939,7 +939,18 @@ fn emit_event(event: &str) {
 
     let body = payload.to_string();
     let seq = format!("\x1b]777;notify;{AGENT_EVENT_SENTINEL};{body}\x07");
-    let out = serde_json::json!({ "terminalSequence": seq });
+    let mut out = serde_json::json!({ "terminalSequence": seq });
+    if event == "prompt-submit" {
+        if let Some(ctx) = linked_notes_context() {
+            out.as_object_mut().unwrap().insert(
+                "hookSpecificOutput".into(),
+                serde_json::json!({
+                    "hookEventName": "UserPromptSubmit",
+                    "additionalContext": ctx,
+                }),
+            );
+        }
+    }
     println!("{out}");
 }
 
@@ -952,14 +963,66 @@ fn record_agent() {
     if let (Some(session_id), Some(tile_id)) = (session_id, tile_id) {
         if let Some(path) = binding_path(&tile_id) {
             let cwd = evt.get("cwd").and_then(|s| s.as_str());
-            let rec = serde_json::json!({
-                "agentSessionId": session_id,
-                "cwd": cwd,
-                "tileId": tile_id,
-            });
+            let mut rec = read_binding_rec(&tile_id)
+                .filter(|v| v.is_object())
+                .unwrap_or_else(|| serde_json::json!({}));
+            let obj = rec.as_object_mut().unwrap();
+            obj.insert("agentSessionId".into(), session_id.into());
+            obj.insert("cwd".into(), cwd.map(Into::into).unwrap_or(serde_json::Value::Null));
+            obj.insert("tileId".into(), tile_id.clone().into());
             let _ = std::fs::write(path, rec.to_string());
         }
     }
+}
+
+fn front_title(path: &str) -> Option<String> {
+    let raw = std::fs::read_to_string(path).ok()?;
+    let rest = raw
+        .strip_prefix("---\n")
+        .or_else(|| raw.strip_prefix("---\r\n"))?;
+    let end = rest.find("\n---")?;
+    for line in rest[..end].lines() {
+        let line = line.trim();
+        if let Some(v) = line.strip_prefix("title:") {
+            let v = v.trim();
+            if v.len() >= 2 && v.starts_with('"') && v.ends_with('"') {
+                return Some(v[1..v.len() - 1].replace("\\\"", "\""));
+            }
+            if v.len() >= 2 && v.starts_with('\'') && v.ends_with('\'') {
+                return Some(v[1..v.len() - 1].replace("''", "'"));
+            }
+            return Some(v.to_string());
+        }
+    }
+    None
+}
+
+fn linked_notes_context() -> Option<String> {
+    let tile_id = std::env::var("PANORAMA_TILE_ID").ok()?;
+    let rec = read_binding_rec(&tile_id)?;
+    let notes = rec.get("notes").and_then(|n| n.as_array())?;
+    let mut lines: Vec<String> = notes
+        .iter()
+        .filter_map(|n| {
+            let path = n.get("path").and_then(|p| p.as_str())?;
+            if path.is_empty() {
+                return None;
+            }
+            let title = front_title(path)
+                .or_else(|| n.get("title").and_then(|t| t.as_str()).map(String::from))
+                .unwrap_or_else(|| "note".to_string());
+            Some(format!("- \"{title}\": {path}"))
+        })
+        .collect();
+    if lines.is_empty() {
+        return None;
+    }
+    lines.insert(
+        0,
+        "Notes linked to this terminal are plain markdown files (checkbox = \"- [ ]\" unchecked / \"- [x]\" checked). The note title is the `title:` field in the leading YAML frontmatter; edit it there to rename. Read or edit these files only when the user asks:"
+            .to_string(),
+    );
+    Some(lines.join("\n"))
 }
 
 fn install_claude_hook() {

@@ -8,6 +8,7 @@ use tauri::{LogicalPosition, LogicalSize, Manager, WebviewUrl, WebviewWindowBuil
 mod git;
 mod store;
 mod docker;
+mod notes;
 
 const SIDECAR_PORT: u16 = 9777;
 const NOTIF_WIDTH: f64 = 448.0;
@@ -348,6 +349,7 @@ pub fn run() {
         .setup(|app| {
             spawn_sidecar();
             create_notif_window(app.handle())?;
+            notes::start_notes_watch(app.handle().clone());
             Ok(())
         })
         .on_window_event(|window, event| {
@@ -395,7 +397,12 @@ pub fn run() {
             docker::docker_available,
             docker::docker_ps,
             docker::docker_action,
-            docker::docker_engine
+            docker::docker_engine,
+            notes::link_note,
+            notes::unlink_note,
+            notes::read_note,
+            notes::write_note,
+            notes::delete_note
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

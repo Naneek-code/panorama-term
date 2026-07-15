@@ -22,6 +22,14 @@
   outline-offset: 1.5px;
 }
 
+.sticky.linkActive {
+  border-color: var(--accent);
+  box-shadow:
+    0 6px 18px rgba(0, 0, 0, 0.22),
+    0 0 0 1px var(--accent),
+    0 0 18px -3px var(--accent);
+}
+
 .fsEnter {
   animation: fs-in 180ms ease-out both;
 }
@@ -165,14 +173,14 @@
 .actions {
   display: flex;
   align-items: center;
-  gap: 2px;
+  gap: 0;
 }
 
 .action {
   display: flex;
   align-items: center;
   justify-content: center;
-  padding: 4px;
+  padding: 4px 2px;
   border: none;
   color: var(--text-muted);
   cursor: pointer;
@@ -185,6 +193,16 @@
 
 .pinned {
   color: var(--accent, var(--text-1));
+}
+
+.linked {
+  cursor: grab;
+}
+
+.linked .rawGlyph {
+  color: var(--note-body, var(--surface-1));
+  border-color: var(--note-text, var(--accent));
+  background: var(--note-text, var(--accent));
 }
 
 .rawGlyph {

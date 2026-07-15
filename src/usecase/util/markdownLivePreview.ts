@@ -138,11 +138,16 @@ const makePlugin = (mode: RevealMode) =>
         if (mode === 'render') {
           if (u.transactions.some((t) => t.isUserEvent('input.toggleTask'))) this.reveal = false;
           else if (u.docChanged) {
-            let inserted = false;
-            u.changes.iterChanges((_fa, _ta, _fb, _tb, text) => {
-              if (text.length) inserted = true;
-            });
-            this.reveal = inserted;
+            const userEdit = u.transactions.some((t) => t.isUserEvent('input') || t.isUserEvent('delete'));
+            if (!userEdit) {
+              this.reveal = false;
+            } else {
+              let inserted = false;
+              u.changes.iterChanges((_fa, _ta, _fb, _tb, text) => {
+                if (text.length) inserted = true;
+              });
+              this.reveal = inserted;
+            }
           } else if (u.selectionSet) this.reveal = false;
         }
         if (u.docChanged || u.viewportChanged || u.selectionSet) this.decorations = build(u.view, this.reveal, mode === 'edit');

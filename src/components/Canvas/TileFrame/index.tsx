@@ -1,6 +1,6 @@
 import React from 'react';
 import type { EditorView } from '@codemirror/view';
-import { X, Pin, PinOff, Copy, Focus, Pencil, Trash2, ArrowUp, Maximize, Minimize, RotateCw, CopyPlus, ArrowDown, GitBranch, ChevronDown, FolderOpen, ClipboardCopy, ClipboardPaste } from 'lucide-react';
+import { X, Pin, Link2, PinOff, Copy, Focus, Pencil, Trash2, ArrowUp, Maximize, Minimize, RotateCw, CopyPlus, ArrowDown, Link2Off, GitBranch, ChevronDown, FolderOpen, ClipboardCopy, ClipboardPaste } from 'lucide-react';
 
 import type { Tile, View } from '~/domain/interfaces/canvas.interface';
 import type { ContextMenuEntry } from '~/components/commons/ContextMenu';
@@ -8,6 +8,7 @@ import type { NotifyKind } from '~/components/commons/Notifications/bridge';
 import NoteTile from '~/components/Canvas/NoteTile';
 import DiffViewer from '~/components/DiffViewer';
 import { noteTheme } from '~/usecase/util/note';
+import { parseFrontTitle } from '~/usecase/util/noteMeta';
 import ClaudeLogo from '~/components/commons/ClaudeLogo';
 import ContextMenu from '~/components/commons/ContextMenu';
 import BranchMenu from '~/components/Canvas/TileFrame/BranchMenu';
@@ -55,6 +56,13 @@ interface TileFrameProps {
   onDuplicate: (id: string) => void;
   onTogglePin: (id: string) => void;
   onToggleSelect: (id: string) => void;
+  wsId: string | null;
+  linkActive: boolean;
+  linkTarget: { id: string; name: string } | null;
+  linkedTerms: { id: string; name: string }[];
+  onLink: (noteId: string, termId: string) => void;
+  onUnlink: (noteId: string, termId: string) => void;
+  onLinkDragStart: (noteId: string, e: React.PointerEvent) => void;
 }
 
 const HANDLES = ['n', 's', 'e', 'w', 'nw', 'ne', 'sw', 'se'];
@@ -66,7 +74,7 @@ const devicePx = (v: number): number => {
   return Math.round(v * dpr) / dpr;
 };
 
-const TileFrame = ({ tile, view, active, selected, alert, visible, live, hidden, fullscreen, exiting, vpW, vpH, onMove, onSnap, onClose, onResize, onActivate, onFocusTile, onToggleFullscreen, onCwd, onOscTitle, onNoteChange, onNoteEditor, onNoteTitle, onCopyNote, onCopyNoteSelection, onPasteNote, onToggleRaw, onRename, onCopyPath, onReveal, onDuplicate, onTogglePin, onToggleSelect }: TileFrameProps) => {
+const TileFrame = ({ tile, view, active, selected, alert, visible, live, hidden, fullscreen, exiting, vpW, vpH, onMove, onSnap, onClose, onResize, onActivate, onFocusTile, onToggleFullscreen, onCwd, onOscTitle, onNoteChange, onNoteEditor, onNoteTitle, onCopyNote, onCopyNoteSelection, onPasteNote, onToggleRaw, onRename, onCopyPath, onReveal, onDuplicate, onTogglePin, onToggleSelect, wsId, linkActive, linkTarget, linkedTerms, onLink, onUnlink, onLinkDragStart }: TileFrameProps) => {
   const k = view.k;
   const drag = React.useRef<{ sx: number; sy: number; ox: number; oy: number } | null>(null);
   const resize = React.useRef<{ x: number; y: number; dir: string } | null>(null);
@@ -136,12 +144,14 @@ const TileFrame = ({ tile, view, active, selected, alert, visible, live, hidden,
   const code = tile.type === 'code';
   const tint = note ? noteTheme(tile.color) : null;
   const noteTint = tint ? { background: tint.body, color: tint.text } : null;
-  const noteLabel = note ? tile.userTitle?.trim() || 'Note' : null;
+  const noteTitle = note ? parseFrontTitle(tile.content) : '';
+  const noteLabel = note ? noteTitle || 'Note' : null;
   const copyNote = () => onCopyNote(tile.id);
   const copyNoteSelection = () => onCopyNoteSelection(tile.id);
   const pasteNote = () => onPasteNote(tile.id);
   const toggleRaw = () => onToggleRaw(tile.id);
   const stopDrag = (e: React.PointerEvent) => e.stopPropagation();
+  const startLinkDrag = (e: React.PointerEvent) => onLinkDragStart(tile.id, e);
 
   const [menu, setMenu] = React.useState<{ x: number; y: number } | null>(null);
   const [menuInContent, setMenuInContent] = React.useState(false);
@@ -160,7 +170,7 @@ const TileFrame = ({ tile, view, active, selected, alert, visible, live, hidden,
   };
 
   const startRename = () => {
-    setDraft(tile.userTitle || tile.autoTitle || '');
+    setDraft(note ? noteTitle : tile.userTitle || tile.autoTitle || '');
     setRenaming(true);
   };
   const startTitleEdit = (e: React.MouseEvent) => {
@@ -171,9 +181,12 @@ const TileFrame = ({ tile, view, active, selected, alert, visible, live, hidden,
     if (!renaming) return;
     setRenaming(false);
     const next = draft.trim();
+    if (note) {
+      if (next !== noteTitle) onNoteTitle(tile.id, next);
+      return;
+    }
     if (next === (tile.userTitle || '')) return;
-    if (note) onNoteTitle(tile.id, next);
-    else onRename(tile.id, next);
+    onRename(tile.id, next);
   };
   const onRenameKey = (e: React.KeyboardEvent) => {
     if (e.key === 'Enter') commitRename();
@@ -237,12 +250,31 @@ const TileFrame = ({ tile, view, active, selected, alert, visible, live, hidden,
       ]
     : [];
 
+  const linkItems: ContextMenuEntry[] = [
+    ...(linkTarget
+      ? [
+          {
+            label: `Link to ${linkTarget.name}`,
+            icon: <Link2 size={15} strokeWidth={1.75} />,
+            onSelect: () => onLink(tile.id, linkTarget.id)
+          }
+        ]
+      : []),
+    ...linkedTerms.map((lt) => ({
+      label: `Unlink from ${lt.name}`,
+      icon: <Link2Off size={15} strokeWidth={1.75} />,
+      onSelect: () => onUnlink(tile.id, lt.id)
+    }))
+  ];
+  if (linkItems.length) linkItems.push('separator');
+
   const noteMenuItems: ContextMenuEntry[] = [
     ...noteContentItems,
     { label: 'Rename', icon: <Pencil size={15} strokeWidth={1.75} />, onSelect: startRename },
     { label: 'Duplicate', icon: <CopyPlus size={15} strokeWidth={1.75} />, onSelect: duplicate },
     pinItem,
     'separator',
+    ...linkItems,
     { label: 'Focus', icon: <Focus size={15} strokeWidth={1.75} />, onSelect: focusTile },
     fullscreenItem,
     'separator',
@@ -280,7 +312,7 @@ const TileFrame = ({ tile, view, active, selected, alert, visible, live, hidden,
   const termCols = Math.max(20, Math.floor((bodyW - 8) / 7.23));
   const termRows = Math.max(2, Math.floor((bodyH - TILE_HEADER - 11) / 15));
   const anim = fullscreen ? (exiting ? styles.fsExit : styles.fsEnter) : null;
-  const cls = [styles.tile, note && styles.sticky, tile.pinned && styles.pinnedTile, selected && !fullscreen && styles.selected, active && !fullscreen && styles.active, anim].filter(Boolean).join(' ');
+  const cls = [styles.tile, note && styles.sticky, tile.pinned && styles.pinnedTile, note && linkActive && styles.linkActive, selected && !fullscreen && styles.selected, active && !fullscreen && styles.active, anim].filter(Boolean).join(' ');
   const gone = { display: hidden ? 'none' : undefined };
 
   return (
@@ -315,7 +347,7 @@ const TileFrame = ({ tile, view, active, selected, alert, visible, live, hidden,
               autoFocus
             />
           ) : (
-            <span className={styles.title} data-empty={note && !tile.userTitle?.trim()} onDoubleClick={startTitleEdit}>
+            <span className={styles.title} data-empty={note && !noteTitle} onDoubleClick={startTitleEdit}>
               {claudeLive && !spinning && (
                 <span className={styles.claudeMark}>
                   <ClaudeLogo size={11} />
@@ -360,6 +392,18 @@ const TileFrame = ({ tile, view, active, selected, alert, visible, live, hidden,
               </button>
             )}
             {note && (
+              <button
+                className={linkedTerms.length ? `${styles.action} ${styles.linked}` : styles.action}
+                onPointerDown={startLinkDrag}
+                aria-label="Link note to terminal"
+                style={tint ? ({ ['--note-body' as string]: tint.body, ['--note-text' as string]: tint.text }) : undefined}
+              >
+                <span className={styles.rawGlyph}>
+                  <Link2 size={12} strokeWidth={2} />
+                </span>
+              </button>
+            )}
+            {note && (
               <button className={styles.action} onClick={copyNote} aria-label="Copy note">
                 <Copy size={13} strokeWidth={2} />
               </button>
@@ -392,7 +436,7 @@ const TileFrame = ({ tile, view, active, selected, alert, visible, live, hidden,
         </div>
         <div className={styles.body} onContextMenu={note ? (e) => openMenu(e, true) : undefined}>
           {note && (
-            <NoteTile tile={tile} active={active} onChange={onNoteChange} onActivate={onActivate} onEditor={onNoteEditor} />
+            <NoteTile tile={tile} wsId={wsId} active={active} onChange={onNoteChange} onActivate={onActivate} onEditor={onNoteEditor} />
           )}
           {code && tile.cwd && tile.filePath && <DiffViewer root={tile.cwd} file={tile.filePath} embedded />}
           {!note && !code && !term && <div className={styles.placeholder}>{tile.type !== 'term' ? label : ''}</div>}

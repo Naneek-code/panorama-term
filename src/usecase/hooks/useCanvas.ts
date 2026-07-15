@@ -1,4 +1,5 @@
 import React from 'react';
+import { listen } from '@tauri-apps/api/event';
 
 import type { Tile, View, Frame, FrameMember } from '~/domain/interfaces/canvas.interface';
 import type { CanvasState } from '~/domain/interfaces/workspace.interface';
@@ -8,7 +9,9 @@ import { tileInFrame } from '~/usecase/util/frame';
 import { getSetting } from '~/adapter/settings/settings.client';
 import { restTarget } from '~/usecase/util/zoomUtils';
 import { killPtySession } from '~/adapter/pty/sidecar.client';
+import { linkNote, unlinkNote, deleteNote } from '~/adapter/notes/notes.client';
 import { computeDragSnap, computeResizeSnap } from '~/usecase/util/magneticSnap';
+import { noteLinkTitle } from '~/usecase/util/noteLink';
 import { NOTE_DEFAULT_COLOR } from '~/usecase/util/note';
 import { toStored, toRuntime, type RuntimeCanvas } from '~/usecase/util/workspaceCanvas';
 import {
@@ -63,10 +66,13 @@ const EMPTY: RuntimeCanvas = { tiles: [], frames: [], view: { x: 0, y: 0, k: 1 }
 
 interface UseCanvasArgs {
   seed: CanvasState | null;
+  wsId: string | null;
   onPersist: (state: CanvasState) => void;
 }
 
-export const useCanvas = ({ seed, onPersist }: UseCanvasArgs) => {
+export const useCanvas = ({ seed, wsId, onPersist }: UseCanvasArgs) => {
+  const wsIdRef = React.useRef(wsId);
+  wsIdRef.current = wsId;
   const initial = React.useRef(seed ? toRuntime(seed) : EMPTY);
   const [frames, setFrames] = React.useState<Frame[]>(initial.current.frames);
   const [tiles, setTiles] = React.useState<Tile[]>(initial.current.tiles);
@@ -252,8 +258,48 @@ export const useCanvas = ({ seed, onPersist }: UseCanvasArgs) => {
     setTiles((prev) => prev.map((t) => (t.id === id ? { ...t, ...patch } : t)));
   }, []);
 
+  React.useEffect(() => {
+    const off = listen<{ noteId: string; content: string }>('note:changed', (e) => {
+      const { noteId, content } = e.payload;
+      setTiles((prev) => prev.map((t) => (t.id === noteId && t.type === 'note' && t.content !== content ? { ...t, content } : t)));
+    });
+    return () => {
+      void off.then((un) => un());
+    };
+  }, []);
+
+  const linkNoteTo = React.useCallback((noteId: string, termId: string) => {
+    const note = tilesRef.current.find((t) => t.id === noteId);
+    if (!note || !wsIdRef.current) return;
+    setTiles((prev) =>
+      prev.map((t) => (t.id === noteId ? { ...t, linkedTo: [...new Set([...(t.linkedTo ?? []), termId])] } : t))
+    );
+    void linkNote(wsIdRef.current, noteId, termId, noteLinkTitle(note)).catch(() => {});
+  }, []);
+
+  const unlinkNoteFrom = React.useCallback((noteId: string, termId: string) => {
+    setTiles((prev) =>
+      prev.map((t) => (t.id === noteId ? { ...t, linkedTo: (t.linkedTo ?? []).filter((id) => id !== termId) } : t))
+    );
+    void unlinkNote(noteId, termId).catch(() => {});
+  }, []);
+
   const closeTile = React.useCallback((id: string) => {
-    setTiles((prev) => prev.filter((t) => t.id !== id));
+    const closing = tilesRef.current.find((t) => t.id === id);
+    if (closing?.type === 'note') {
+      for (const termId of closing.linkedTo ?? []) void unlinkNote(id, termId).catch(() => {});
+      if (wsIdRef.current) void deleteNote(wsIdRef.current, id).catch(() => {});
+    }
+    if (closing?.type === 'term') {
+      for (const t of tilesRef.current) {
+        if (t.type === 'note' && (t.linkedTo ?? []).includes(id)) void unlinkNote(t.id, id).catch(() => {});
+      }
+    }
+    setTiles((prev) =>
+      prev
+        .filter((t) => t.id !== id)
+        .map((t) => (t.type === 'note' && (t.linkedTo ?? []).includes(id) ? { ...t, linkedTo: (t.linkedTo ?? []).filter((x) => x !== id) } : t))
+    );
     setActiveTile((a) => (a === id ? null : a));
     void killPtySession(id);
   }, []);
@@ -713,6 +759,8 @@ export const useCanvas = ({ seed, onPersist }: UseCanvasArgs) => {
     duplicateTile,
     moveTile,
     snapTile,
+    linkNoteTo,
+    unlinkNoteFrom,
     dragFrame,
     closeTile,
     snapFrame,

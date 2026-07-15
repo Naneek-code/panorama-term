@@ -22,6 +22,7 @@ export interface Tile {
   content?: string;
   pinned?: boolean;
   renderOnly?: boolean;
+  linkedTo?: string[];
 }
 
 export interface Frame {
