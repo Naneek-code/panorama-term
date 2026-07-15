@@ -75,6 +75,7 @@ export const useCanvas = ({ seed, onPersist }: UseCanvasArgs) => {
   const [selected, setSelected] = React.useState<Set<string>>(() => new Set());
   const [marquee, setMarquee] = React.useState<{ x: number; y: number; width: number; height: number } | null>(null);
 
+  const noteRenderDefault = React.useRef(false);
   const bgRef = React.useRef<HTMLDivElement>(null);
   const gridRef = React.useRef<HTMLCanvasElement>(null);
   const indicatorRef = React.useRef<HTMLDivElement>(null);
@@ -216,6 +217,7 @@ export const useCanvas = ({ seed, onPersist }: UseCanvasArgs) => {
           height: NOTE_HEIGHT,
           color: NOTE_DEFAULT_COLOR,
           content: '',
+          renderOnly: noteRenderDefault.current,
           zIndex: prev.reduce((m, t) => Math.max(m, t.zIndex), 0) + 1
         }
       ]);
@@ -699,6 +701,7 @@ export const useCanvas = ({ seed, onPersist }: UseCanvasArgs) => {
     toggleSelect,
     clearSelection,
     addNote,
+    noteRenderDefault,
     focusTile,
     focusFrame,
     gridRef,

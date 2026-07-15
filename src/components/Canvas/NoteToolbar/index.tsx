@@ -1,49 +1,64 @@
 import React from 'react';
-import type { Editor } from '@tiptap/react';
-import {
-  Bold,
-  Code,
-  List,
-  Italic,
-  Heading1,
-  AlignLeft,
-  ListChecks,
-  AlignRight,
-  Underline,
-  AlignCenter,
-  ListOrdered,
-  Strikethrough
-} from 'lucide-react';
+import type { EditorView } from '@codemirror/view';
+import { Bold, Code, List, Italic, Heading1, ListChecks, ListOrdered, Strikethrough } from 'lucide-react';
 
 import { NOTE_PALETTE, noteTheme } from '~/usecase/util/note';
 
 import styles from './styles.module.scss';
 
 interface NoteToolbarProps {
-  editor: Editor;
+  editor: EditorView;
   color: string;
   onColor: (color: string) => void;
 }
 
+const wrap = (view: EditorView, m: string) => {
+  const { from, to } = view.state.selection.main;
+  const before = view.state.doc.sliceString(Math.max(0, from - m.length), from) === m;
+  const after = view.state.doc.sliceString(to, to + m.length) === m;
+
+  if (before && after) {
+    view.dispatch({
+      changes: [
+        { from: from - m.length, to: from, insert: '' },
+        { from: to, to: to + m.length, insert: '' }
+      ],
+      selection: { anchor: from - m.length, head: to - m.length }
+    });
+  } else if (from !== to) {
+    view.dispatch({
+      changes: [
+        { from, insert: m },
+        { from: to, insert: m }
+      ],
+      selection: { anchor: from + m.length, head: to + m.length }
+    });
+  } else {
+    view.dispatch({ changes: { from, insert: m + m }, selection: { anchor: from + m.length } });
+  }
+  view.focus();
+};
+
+const prefix = (view: EditorView, p: string) => {
+  const { from, to } = view.state.selection.main;
+  const first = view.state.doc.lineAt(from).number;
+  const last = view.state.doc.lineAt(to).number;
+  const changes = [];
+
+  for (let n = first; n <= last; n += 1) {
+    const line = view.state.doc.line(n);
+    if (line.text.startsWith(p)) changes.push({ from: line.from, to: line.from + p.length, insert: '' });
+    else changes.push({ from: line.from, insert: p });
+  }
+  view.dispatch({ changes });
+  view.focus();
+};
+
 const NoteToolbar = ({ editor, color, onColor }: NoteToolbarProps) => {
-  const [, force] = React.useReducer((n: number) => n + 1, 0);
-
-  React.useEffect(() => {
-    editor.on('transaction', force);
-    editor.on('selectionUpdate', force);
-    return () => {
-      editor.off('transaction', force);
-      editor.off('selectionUpdate', force);
-    };
-  }, [editor]);
-
-  const run = (fn: (chain: ReturnType<Editor['chain']>) => ReturnType<Editor['chain']>) => () =>
-    fn(editor.chain().focus()).run();
-
-  const btn = (active: boolean, onClick: () => void, label: string, icon: React.ReactNode) => (
+  const btn = (onClick: () => void, label: string, icon: React.ReactNode) => (
     <button
       key={label}
-      className={active ? `${styles.btn} ${styles.on}` : styles.btn}
+      className={styles.btn}
       onMouseDown={(e) => e.preventDefault()}
       onClick={onClick}
       aria-label={label}
@@ -67,20 +82,15 @@ const NoteToolbar = ({ editor, color, onColor }: NoteToolbarProps) => {
         ))}
       </div>
       <span className={styles.divider} />
-      {btn(editor.isActive('bold'), run((c) => c.toggleBold()), 'Bold', <Bold size={15} strokeWidth={2} />)}
-      {btn(editor.isActive('italic'), run((c) => c.toggleItalic()), 'Italic', <Italic size={15} strokeWidth={2} />)}
-      {btn(editor.isActive('underline'), run((c) => c.toggleUnderline()), 'Underline', <Underline size={15} strokeWidth={2} />)}
-      {btn(editor.isActive('strike'), run((c) => c.toggleStrike()), 'Strikethrough', <Strikethrough size={15} strokeWidth={2} />)}
-      {btn(editor.isActive('code'), run((c) => c.toggleCode()), 'Code', <Code size={15} strokeWidth={2} />)}
+      {btn(() => wrap(editor, '**'), 'Bold', <Bold size={15} strokeWidth={2} />)}
+      {btn(() => wrap(editor, '*'), 'Italic', <Italic size={15} strokeWidth={2} />)}
+      {btn(() => wrap(editor, '~~'), 'Strikethrough', <Strikethrough size={15} strokeWidth={2} />)}
+      {btn(() => wrap(editor, '`'), 'Code', <Code size={15} strokeWidth={2} />)}
       <span className={styles.divider} />
-      {btn(editor.isActive('heading', { level: 1 }), run((c) => c.toggleHeading({ level: 1 })), 'Heading', <Heading1 size={15} strokeWidth={2} />)}
-      {btn(editor.isActive('bulletList'), run((c) => c.toggleBulletList()), 'Bullet list', <List size={15} strokeWidth={2} />)}
-      {btn(editor.isActive('orderedList'), run((c) => c.toggleOrderedList()), 'Numbered list', <ListOrdered size={15} strokeWidth={2} />)}
-      {btn(editor.isActive('taskList'), run((c) => c.toggleTaskList()), 'Checklist', <ListChecks size={15} strokeWidth={2} />)}
-      <span className={styles.divider} />
-      {btn(editor.isActive({ textAlign: 'left' }), run((c) => c.setTextAlign('left')), 'Align left', <AlignLeft size={15} strokeWidth={2} />)}
-      {btn(editor.isActive({ textAlign: 'center' }), run((c) => c.setTextAlign('center')), 'Align center', <AlignCenter size={15} strokeWidth={2} />)}
-      {btn(editor.isActive({ textAlign: 'right' }), run((c) => c.setTextAlign('right')), 'Align right', <AlignRight size={15} strokeWidth={2} />)}
+      {btn(() => prefix(editor, '# '), 'Heading', <Heading1 size={15} strokeWidth={2} />)}
+      {btn(() => prefix(editor, '- '), 'Bullet list', <List size={15} strokeWidth={2} />)}
+      {btn(() => prefix(editor, '1. '), 'Numbered list', <ListOrdered size={15} strokeWidth={2} />)}
+      {btn(() => prefix(editor, '- [ ] '), 'Checklist', <ListChecks size={15} strokeWidth={2} />)}
     </div>
   );
 };

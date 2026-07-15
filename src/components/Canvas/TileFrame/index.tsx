@@ -1,5 +1,5 @@
 import React from 'react';
-import type { Editor } from '@tiptap/react';
+import type { EditorView } from '@codemirror/view';
 import { X, Pin, PinOff, Copy, Focus, Pencil, Trash2, ArrowUp, Maximize, Minimize, RotateCw, CopyPlus, ArrowDown, GitBranch, ChevronDown, FolderOpen, ClipboardCopy } from 'lucide-react';
 
 import type { Tile, View } from '~/domain/interfaces/canvas.interface';
@@ -43,9 +43,10 @@ interface TileFrameProps {
   onCwd: (id: string, cwd: string, branch?: string) => void;
   onOscTitle: (id: string, title: string) => void;
   onNoteChange: (id: string, content: string) => void;
-  onNoteEditor: (id: string, editor: Editor | null) => void;
+  onNoteEditor: (id: string, editor: EditorView | null) => void;
   onNoteTitle: (id: string, title: string) => void;
   onCopyNote: (id: string) => void;
+  onToggleRaw: (id: string) => void;
   onRename: (id: string, title: string) => void;
   onCopyPath: (id: string) => void;
   onReveal: (id: string) => void;
@@ -63,7 +64,7 @@ const devicePx = (v: number): number => {
   return Math.round(v * dpr) / dpr;
 };
 
-const TileFrame = ({ tile, view, active, selected, alert, visible, live, hidden, fullscreen, exiting, vpW, vpH, onMove, onSnap, onClose, onResize, onActivate, onFocusTile, onToggleFullscreen, onCwd, onOscTitle, onNoteChange, onNoteEditor, onNoteTitle, onCopyNote, onRename, onCopyPath, onReveal, onDuplicate, onTogglePin, onToggleSelect }: TileFrameProps) => {
+const TileFrame = ({ tile, view, active, selected, alert, visible, live, hidden, fullscreen, exiting, vpW, vpH, onMove, onSnap, onClose, onResize, onActivate, onFocusTile, onToggleFullscreen, onCwd, onOscTitle, onNoteChange, onNoteEditor, onNoteTitle, onCopyNote, onToggleRaw, onRename, onCopyPath, onReveal, onDuplicate, onTogglePin, onToggleSelect }: TileFrameProps) => {
   const k = view.k;
   const drag = React.useRef<{ sx: number; sy: number; ox: number; oy: number } | null>(null);
   const resize = React.useRef<{ x: number; y: number; dir: string } | null>(null);
@@ -135,6 +136,7 @@ const TileFrame = ({ tile, view, active, selected, alert, visible, live, hidden,
   const noteTint = tint ? { background: tint.body, color: tint.text } : null;
   const noteLabel = note ? tile.userTitle?.trim() || 'Note' : null;
   const copyNote = () => onCopyNote(tile.id);
+  const toggleRaw = () => onToggleRaw(tile.id);
   const stopDrag = (e: React.PointerEvent) => e.stopPropagation();
 
   const [menu, setMenu] = React.useState<{ x: number; y: number } | null>(null);
@@ -314,6 +316,17 @@ const TileFrame = ({ tile, view, active, selected, alert, visible, live, hidden,
             </span>
           )}
           <div className={styles.actions}>
+            {note && (
+              <button
+                className={tile.renderOnly ? `${styles.action} ${styles.rawOn}` : styles.action}
+                onClick={toggleRaw}
+                aria-label={tile.renderOnly ? 'Show markdown on edit' : 'Rendered only'}
+                data-tooltip={tile.renderOnly ? 'Rendered' : 'Live edit'}
+                style={tint ? ({ ['--note-body' as string]: tint.body, ['--note-text' as string]: tint.text }) : undefined}
+              >
+                <span className={styles.rawGlyph}>M</span>
+              </button>
+            )}
             {note && (
               <button className={styles.action} onClick={copyNote} aria-label="Copy note">
                 <Copy size={13} strokeWidth={2} />
