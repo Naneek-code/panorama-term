@@ -408,7 +408,7 @@ fn repo_root(path: &str) -> Result<String, String> {
 }
 
 #[tauri::command]
-pub fn git_status(path: String) -> Result<StatusSnapshot, String> {
+pub async fn git_status(path: String) -> Result<StatusSnapshot, String> {
     let path = repo_root(&path)?;
     let out = Command::new("git")
         .arg("-C")
@@ -446,7 +446,7 @@ pub fn git_status(path: String) -> Result<StatusSnapshot, String> {
 }
 
 #[tauri::command]
-pub fn git_commit(path: String, files: Vec<String>, message: String, amend: bool) -> Result<(), String> {
+pub async fn git_commit(path: String, files: Vec<String>, message: String, amend: bool) -> Result<(), String> {
     if files.is_empty() && !amend {
         return Err("No files selected".into());
     }
@@ -476,7 +476,7 @@ pub fn git_commit(path: String, files: Vec<String>, message: String, amend: bool
 }
 
 #[tauri::command]
-pub fn git_log_messages(path: String, limit: Option<u32>) -> Result<Vec<CommitMessageEntry>, String> {
+pub async fn git_log_messages(path: String, limit: Option<u32>) -> Result<Vec<CommitMessageEntry>, String> {
     let n = limit.unwrap_or(20).to_string();
     let out = run_git(
         &path,
@@ -486,7 +486,7 @@ pub fn git_log_messages(path: String, limit: Option<u32>) -> Result<Vec<CommitMe
 }
 
 #[tauri::command]
-pub fn git_unpushed_commits(path: String) -> Result<Vec<CommitMessageEntry>, String> {
+pub async fn git_unpushed_commits(path: String) -> Result<Vec<CommitMessageEntry>, String> {
     let fmt = "--format=%x1e%h%x1f%ad%x1f%B";
     let out = run_git(&path, &["log", "@{u}..HEAD", fmt, "--date=short"])
         .or_else(|_| run_git(&path, &["log", "-n", "10", fmt, "--date=short"]))?;
@@ -500,7 +500,7 @@ pub struct TrackCounts {
 }
 
 #[tauri::command]
-pub fn git_ahead_behind(path: String) -> TrackCounts {
+pub async fn git_ahead_behind(path: String) -> TrackCounts {
     let (ahead, behind) = run_git(&path, &["rev-list", "--left-right", "--count", "@{upstream}...HEAD"])
         .ok()
         .and_then(|out| {
@@ -514,12 +514,12 @@ pub fn git_ahead_behind(path: String) -> TrackCounts {
 }
 
 #[tauri::command]
-pub fn git_branches(path: String) -> Result<BranchSnapshot, String> {
+pub async fn git_branches(path: String) -> Result<BranchSnapshot, String> {
     snapshot(&path)
 }
 
 #[tauri::command]
-pub fn git_checkout(path: String, branch: String) -> Result<BranchSnapshot, String> {
+pub async fn git_checkout(path: String, branch: String) -> Result<BranchSnapshot, String> {
     let target = match branch.split_once('/') {
         Some((remote, rest)) if remote_names(&path).iter().any(|r| r == remote) => rest.to_string(),
         _ => branch.clone(),
@@ -535,13 +535,13 @@ pub fn git_checkout(path: String, branch: String) -> Result<BranchSnapshot, Stri
 }
 
 #[tauri::command]
-pub fn git_fetch(path: String) -> Result<BranchSnapshot, String> {
+pub async fn git_fetch(path: String) -> Result<BranchSnapshot, String> {
     run_git(&path, &["fetch", "--prune", "--all"])?;
     snapshot(&path)
 }
 
 #[tauri::command]
-pub fn git_create_branch(
+pub async fn git_create_branch(
     path: String,
     name: String,
     checkout: bool,
@@ -572,7 +572,7 @@ pub fn git_create_branch(
 }
 
 #[tauri::command]
-pub fn git_rename_branch(
+pub async fn git_rename_branch(
     path: String,
     old_name: String,
     new_name: String,
@@ -594,7 +594,7 @@ pub fn git_rename_branch(
 }
 
 #[tauri::command]
-pub fn git_delete_branch(
+pub async fn git_delete_branch(
     path: String,
     full_name: String,
     is_remote: bool,
@@ -617,19 +617,19 @@ pub fn git_delete_branch(
 }
 
 #[tauri::command]
-pub fn git_merge_branch(path: String, branch: String) -> Result<BranchSnapshot, String> {
+pub async fn git_merge_branch(path: String, branch: String) -> Result<BranchSnapshot, String> {
     run_git(&path, &["merge", branch.trim()])?;
     snapshot(&path)
 }
 
 #[tauri::command]
-pub fn git_rebase_onto(path: String, branch: String) -> Result<BranchSnapshot, String> {
+pub async fn git_rebase_onto(path: String, branch: String) -> Result<BranchSnapshot, String> {
     run_git(&path, &["rebase", branch.trim()])?;
     snapshot(&path)
 }
 
 #[tauri::command]
-pub fn git_update_branch(path: String, rebase: bool) -> Result<BranchSnapshot, String> {
+pub async fn git_update_branch(path: String, rebase: bool) -> Result<BranchSnapshot, String> {
     if rebase {
         run_git(&path, &["pull", "--rebase"])?;
     } else {
@@ -639,7 +639,7 @@ pub fn git_update_branch(path: String, rebase: bool) -> Result<BranchSnapshot, S
 }
 
 #[tauri::command]
-pub fn git_push_current(path: String) -> Result<BranchSnapshot, String> {
+pub async fn git_push_current(path: String) -> Result<BranchSnapshot, String> {
     if let Err(e) = run_git(&path, &["push"]) {
         let needs_upstream = e.contains("no upstream") || e.contains("set-upstream");
         let Some(current) = head_name(&path).filter(|_| needs_upstream) else {
@@ -651,7 +651,7 @@ pub fn git_push_current(path: String) -> Result<BranchSnapshot, String> {
 }
 
 #[tauri::command]
-pub fn git_set_upstream(
+pub async fn git_set_upstream(
     path: String,
     branch: String,
     upstream: Option<String>,
@@ -667,7 +667,7 @@ pub fn git_set_upstream(
 }
 
 #[tauri::command]
-pub fn git_compare_with_current(path: String, branch: String) -> Result<Vec<CommitInfo>, String> {
+pub async fn git_compare_with_current(path: String, branch: String) -> Result<Vec<CommitInfo>, String> {
     let current = head_name(&path).unwrap_or_else(|| "HEAD".into());
     let range = format!("{}..{}", current, branch.trim());
     let out = run_git(
@@ -698,7 +698,7 @@ pub fn git_compare_with_current(path: String, branch: String) -> Result<Vec<Comm
 }
 
 #[tauri::command]
-pub fn git_toggle_branch_favorite(
+pub async fn git_toggle_branch_favorite(
     path: String,
     full_name: String,
 ) -> Result<BranchSnapshot, String> {
@@ -746,7 +746,7 @@ fn rename_source(repo: &str, file: &str) -> Option<String> {
 }
 
 #[tauri::command]
-pub fn git_diff_file(path: String, file: String) -> Result<FileDiff, String> {
+pub async fn git_diff_file(path: String, file: String) -> Result<FileDiff, String> {
     let mut old = run_git(&path, &["show", &format!("HEAD:{}", file)]).unwrap_or_default();
 
     if old.is_empty() {
@@ -785,7 +785,7 @@ fn watchers() -> &'static Mutex<HashMap<u32, RecommendedWatcher>> {
 }
 
 #[tauri::command]
-pub fn git_watch_file(app: tauri::AppHandle, path: String, file: String) -> Result<u32, String> {
+pub async fn git_watch_file(app: tauri::AppHandle, path: String, file: String) -> Result<u32, String> {
     let full = PathBuf::from(&path).join(&file);
     let dir = full.parent().ok_or("no parent dir")?.to_path_buf();
     let name = full.file_name().ok_or("no file name")?.to_os_string();
@@ -822,12 +822,12 @@ pub fn git_watch_file(app: tauri::AppHandle, path: String, file: String) -> Resu
 }
 
 #[tauri::command]
-pub fn git_unwatch_file(id: u32) {
+pub async fn git_unwatch_file(id: u32) {
     watchers().lock().unwrap().remove(&id);
 }
 
 #[tauri::command]
-pub fn git_rollback_file(path: String, file: String) -> Result<(), String> {
+pub async fn git_rollback_file(path: String, file: String) -> Result<(), String> {
     if run_git(&path, &["cat-file", "-e", &format!("HEAD:{}", file)]).is_ok() {
         run_git(&path, &["checkout", "HEAD", "--", &file])?;
         return Ok(());
@@ -842,7 +842,7 @@ pub fn git_rollback_file(path: String, file: String) -> Result<(), String> {
 }
 
 #[tauri::command]
-pub fn git_add_ignore(path: String, pattern: String, local: bool) -> Result<(), String> {
+pub async fn git_add_ignore(path: String, pattern: String, local: bool) -> Result<(), String> {
     let file = if local {
         let dir = run_git(&path, &["rev-parse", "--git-common-dir"])?;
         let mut base = PathBuf::from(dir.trim());
@@ -870,7 +870,7 @@ pub fn git_add_ignore(path: String, pattern: String, local: bool) -> Result<(), 
 }
 
 #[tauri::command]
-pub fn git_revert_hunk(path: String, file: String, content: String, crlf: bool) -> Result<(), String> {
+pub async fn git_revert_hunk(path: String, file: String, content: String, crlf: bool) -> Result<(), String> {
     let full = PathBuf::from(&path).join(&file);
     let text = if crlf {
         content.replace('\n', "\r\n")
