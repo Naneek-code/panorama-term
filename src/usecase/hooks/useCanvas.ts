@@ -550,7 +550,7 @@ export const useCanvas = ({ seed, wsId, onPersist }: UseCanvasArgs) => {
     const p = panRef.current;
     if (!p) return;
     if (!p.moved && Math.hypot(e.clientX - p.ox, e.clientY - p.oy) > 4) p.moved = true;
-    setView((v) => ({ ...v, x: p.vx + (e.clientX - p.ox), y: p.vy + (e.clientY - p.oy) }));
+    if (p.pan) setView((v) => ({ ...v, x: p.vx + (e.clientX - p.ox), y: p.vy + (e.clientY - p.oy) }));
   };
 
   const endPan = () => {

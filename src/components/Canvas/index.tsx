@@ -26,6 +26,7 @@ import styles from './styles.module.scss';
 
 const FS_ANIM = 170;
 const DIFF_ANIM = 130;
+const DBLCLICK_MS = 400;
 const ALERTS_KEY = 'panorama:alerts';
 
 const loadAlerts = (): Map<string, NotifyKind> => {
@@ -207,6 +208,12 @@ const Canvas = () => {
         reopenTile();
         return true;
       }
+      if (cmd === 'tile.focus') {
+        const id = activeTileRef.current;
+        if (!id) return false;
+        focusTile(id, true);
+        return true;
+      }
       if (cmd === 'view.resetZoom') {
         resetZoom();
         return true;
@@ -227,7 +234,7 @@ const Canvas = () => {
     };
     window.addEventListener('keydown', onKey, true);
     return () => window.removeEventListener('keydown', onKey, true);
-  }, [toggleFs, addTile, addNote, closeTile, reopenTile, resetZoom]);
+  }, [toggleFs, addTile, addNote, closeTile, reopenTile, resetZoom, focusTile]);
 
   React.useEffect(() => {
     if (!fsId) return;
@@ -302,6 +309,22 @@ const Canvas = () => {
   });
 
   const closeMenu = () => setMenu(null);
+
+  const preActive = React.useRef<string | null>(null);
+  const lastDownAt = React.useRef(0);
+
+  const onBgPointerDownCapture = (e: React.PointerEvent) => {
+    const now = e.timeStamp;
+    if (now - lastDownAt.current > DBLCLICK_MS) preActive.current = activeTile;
+    lastDownAt.current = now;
+  };
+
+  const onBgDoubleClick = (e: React.MouseEvent) => {
+    const el = (e.target as Element).closest('[data-tile]');
+    const id = el?.getAttribute('data-tile');
+    if (!id || id === preActive.current) return;
+    focusTile(id, true);
+  };
 
   const openMenu = (e: React.MouseEvent) => {
     if ((e.target as Element).closest('[data-tile]')) return;
@@ -473,9 +496,11 @@ const Canvas = () => {
         onWheel={onWheel}
         onPointerUp={endPan}
         onContextMenu={openMenu}
+        onDoubleClick={onBgDoubleClick}
         onPointerDown={onBgPointerDown}
         onPointerMove={onBgPointerMove}
         onPointerCancel={endPan}
+        onPointerDownCapture={onBgPointerDownCapture}
       >
         <canvas ref={gridRef} className={styles.grid} />
         {!fsId && (

@@ -37,7 +37,7 @@ interface TileFrameProps {
   onClose: (id: string) => void;
   onSnap: (id: string) => void;
   onActivate: (id: string) => void;
-  onFocusTile: (id: string) => void;
+  onFocusTile: (id: string, zoomToMax?: boolean) => void;
   onToggleFullscreen: (id: string) => void;
   onMove: (id: string, dx: number, dy: number) => void;
   onResize: (id: string, dir: string, dx: number, dy: number) => void;
@@ -69,6 +69,8 @@ const HANDLES = ['n', 's', 'e', 'w', 'nw', 'ne', 'sw', 'se'];
 
 const FS_PAD = 28;
 
+const DRAG_THRESHOLD = 4;
+
 const devicePx = (v: number): number => {
   const dpr = window.devicePixelRatio || 1;
   return Math.round(v * dpr) / dpr;
@@ -76,7 +78,7 @@ const devicePx = (v: number): number => {
 
 const TileFrame = ({ tile, view, active, selected, alert, visible, live, hidden, fullscreen, exiting, vpW, vpH, onMove, onSnap, onClose, onResize, onActivate, onFocusTile, onToggleFullscreen, onCwd, onOscTitle, onNoteChange, onNoteEditor, onNoteTitle, onCopyNote, onCopyNoteSelection, onPasteNote, onToggleRaw, onRename, onCopyPath, onReveal, onDuplicate, onTogglePin, onToggleSelect, wsId, linkActive, linkTarget, linkedTerms, onLink, onUnlink, onLinkDragStart }: TileFrameProps) => {
   const k = view.k;
-  const drag = React.useRef<{ sx: number; sy: number; ox: number; oy: number } | null>(null);
+  const drag = React.useRef<{ sx: number; sy: number; ox: number; oy: number; pid: number; on: boolean } | null>(null);
   const resize = React.useRef<{ x: number; y: number; dir: string } | null>(null);
   const [claudeLive, setClaudeLive] = React.useState(false);
   const [claudeBusy, setClaudeBusy] = React.useState(false);
@@ -93,18 +95,23 @@ const TileFrame = ({ tile, view, active, selected, alert, visible, live, hidden,
     }
     if (!selected) onActivate(tile.id);
     if (tile.pinned) return;
-    (e.target as Element).setPointerCapture(e.pointerId);
-    drag.current = { sx: e.clientX, sy: e.clientY, ox: tile.x, oy: tile.y };
+    drag.current = { sx: e.clientX, sy: e.clientY, ox: tile.x, oy: tile.y, pid: e.pointerId, on: false };
   };
   const onDrag = (e: React.PointerEvent) => {
     const d = drag.current;
     if (!d) return;
+    if (!d.on) {
+      if (Math.abs(e.clientX - d.sx) < DRAG_THRESHOLD && Math.abs(e.clientY - d.sy) < DRAG_THRESHOLD) return;
+      d.on = true;
+      (e.target as Element).setPointerCapture(d.pid);
+    }
     onMove(tile.id, d.ox + (e.clientX - d.sx) / k, d.oy + (e.clientY - d.sy) / k);
   };
   const endDrag = () => {
-    if (!drag.current) return;
+    const d = drag.current;
+    if (!d) return;
     drag.current = null;
-    onSnap(tile.id);
+    if (d.on) onSnap(tile.id);
   };
 
   const startResize = (dir: string) => (e: React.PointerEvent) => {
@@ -129,7 +136,7 @@ const TileFrame = ({ tile, view, active, selected, alert, visible, live, hidden,
   const [restartKey, setRestartKey] = React.useState(0);
   const restartTile = () => setRestartKey((n) => n + 1);
   const closeTile = () => onClose(tile.id);
-  const focusTile = () => onFocusTile(tile.id);
+  const focusTile = () => onFocusTile(tile.id, true);
   const toggleFullscreen = () => onToggleFullscreen(tile.id);
   const oscTitle = tile.oscTitle ? stripStarPrefix(tile.oscTitle).trim() : '';
   const spinning = !tile.userTitle && claudeBusy && hasSpinnerPrefix(oscTitle);
@@ -324,7 +331,6 @@ const TileFrame = ({ tile, view, active, selected, alert, visible, live, hidden,
           onPointerDown={startDrag}
           onPointerMove={onDrag}
           onPointerCancel={endDrag}
-          onDoubleClick={focusTile}
           onContextMenu={openMenu}
         >
           {progress && !note && (
