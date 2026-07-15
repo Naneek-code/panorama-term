@@ -202,6 +202,15 @@ const theme = EditorView.baseTheme({
 
 export type RevealMode = 'edit' | 'render';
 
+export const stripHiddenMarks = (text: string): string =>
+  text
+    .split('\n')
+    .map((line) => line.replace(/^(\s*)(?:#{1,6} |> |- \[[ xX]\] )/, '$1'))
+    .join('\n');
+
+const copyFilter = EditorView.clipboardOutputFilter.of(stripHiddenMarks);
+
 export const markdownBase = (): Extension => markdown({ base: markdownLanguage });
 
-export const livePreview = (mode: RevealMode = 'edit'): Extension => [makePlugin(mode), theme];
+export const livePreview = (mode: RevealMode = 'edit'): Extension =>
+  mode === 'render' ? [makePlugin(mode), theme, copyFilter] : [makePlugin(mode), theme];
