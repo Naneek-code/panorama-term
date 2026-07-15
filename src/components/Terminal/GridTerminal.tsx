@@ -272,9 +272,12 @@ const GridTerminal = ({ tileId, cwd, cols, rows, active, visible, k, restartKey,
     }
 
     const hov = hoverRef.current;
-    if (hov && hov.row >= 0 && hov.row < nRows) {
+    if (hov) {
       ctx.fillStyle = termTheme.fg;
-      ctx.fillRect(hov.c0 * cellW, snapY(hov.row * CELL_H + CELL_H - 1), (hov.c1 - hov.c0 + 1) * cellW, 1);
+      for (const seg of hov.segments) {
+        if (seg.row < 0 || seg.row >= nRows) continue;
+        ctx.fillRect(seg.c0 * cellW, snapY(seg.row * CELL_H + CELL_H - 1), (seg.c1 - seg.c0 + 1) * cellW, 1);
+      }
     }
 
     if (activeRef.current && blinkRef.current && !frame.cursorHidden) {
@@ -529,7 +532,7 @@ const GridTerminal = ({ tileId, cwd, cols, rows, active, visible, k, restartKey,
     const frame = frameRef.current;
     const ws = wsRef.current;
     if (e.button === 0 && (e.ctrlKey || e.metaKey) && frame) {
-      const span = urlSpanAt(frame.lines[cell.row] ?? '', cell.row, cell.col);
+      const span = urlSpanAt(frame.lines, frame.cols, cell.row, cell.col);
       if (span) {
         e.preventDefault();
         e.stopPropagation();
@@ -599,10 +602,12 @@ const GridTerminal = ({ tileId, cwd, cols, rows, active, visible, k, restartKey,
       if (canvas) {
         const frame = frameRef.current;
         const cell = (e.ctrlKey || e.metaKey) && frame ? cellFromEvent(e) : null;
-        const span = cell && frame ? urlSpanAt(frame.lines[cell.row] ?? '', cell.row, cell.col) : null;
+        const span = cell && frame ? urlSpanAt(frame.lines, frame.cols, cell.row, cell.col) : null;
         canvas.style.cursor = span ? 'pointer' : '';
         const prev = hoverRef.current;
-        if (span?.url !== prev?.url || span?.row !== prev?.row || span?.c0 !== prev?.c0) {
+        const seg = span?.segments[0];
+        const pseg = prev?.segments[0];
+        if (span?.url !== prev?.url || seg?.row !== pseg?.row || seg?.c0 !== pseg?.c0) {
           hoverRef.current = span;
           dirtyRef.current = true;
         }
