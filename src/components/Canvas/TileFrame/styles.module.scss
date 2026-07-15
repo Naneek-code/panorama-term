@@ -187,6 +187,27 @@
   color: var(--accent, var(--text-1));
 }
 
+.rawGlyph {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 16px;
+  height: 16px;
+  font-size: 10px;
+  font-weight: 700;
+  line-height: 1;
+  border: 1px solid transparent;
+  border-radius: 3px;
+}
+
+.rawOn {
+  .rawGlyph {
+    color: var(--note-body, var(--surface-1));
+    border-color: var(--note-text, var(--accent));
+    background: var(--note-text, var(--accent));
+  }
+}
+
 .pinnedTile .header {
   cursor: default;
 }

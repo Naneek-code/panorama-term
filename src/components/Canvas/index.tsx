@@ -1,10 +1,10 @@
 import React from 'react';
 import { invoke } from '@tauri-apps/api/core';
-import type { Editor } from '@tiptap/react';
+import type { EditorView } from '@codemirror/view';
 import { Group, StickyNote, SquareDashed, SquareTerminal } from 'lucide-react';
 
 import { revealPath } from '~/adapter/shell/shell.client';
-import { writeClipboard } from '~/adapter/clipboard/clipboard.client';
+import { readClipboard, writeClipboard } from '~/adapter/clipboard/clipboard.client';
 import Frame from '~/components/Canvas/Frame';
 import FrameBar from '~/components/Canvas/FrameBar';
 import Minimap from '~/components/Canvas/Minimap';
@@ -45,6 +45,7 @@ const Canvas = () => {
     toggleSelect,
     clearSelection,
     addNote,
+    noteRenderDefault,
     addTile,
     addCode,
     patchTile,
@@ -79,7 +80,7 @@ const Canvas = () => {
 
   const [menu, setMenu] = React.useState<Menu | null>(null);
   const [alerts, setAlerts] = React.useState<Map<string, NotifyKind>>(() => new Map());
-  const [noteEditors, setNoteEditors] = React.useState<Record<string, Editor>>({});
+  const [noteEditors, setNoteEditors] = React.useState<Record<string, EditorView>>({});
   const [size, setSize] = React.useState({ w: window.innerWidth, h: window.innerHeight });
   const [fsId, setFsId] = React.useState<string | null>(null);
   const [fsExit, setFsExit] = React.useState(false);
@@ -267,6 +268,11 @@ const Canvas = () => {
   const setNoteTitle = (id: string, title: string) => patchTile(id, { userTitle: title });
   const setTileTitle = (id: string, title: string) => patchTile(id, { userTitle: title || undefined });
   const togglePin = (id: string) => patchTile(id, { pinned: !tiles.find((t) => t.id === id)?.pinned });
+  const toggleNoteRaw = (id: string) => {
+    const next = !tiles.find((t) => t.id === id)?.renderOnly;
+    noteRenderDefault.current = next;
+    patchTile(id, { renderOnly: next });
+  };
 
   const copyTilePath = (id: string) => {
     const cwd = tiles.find((t) => t.id === id)?.cwd;
@@ -280,10 +286,27 @@ const Canvas = () => {
 
   const copyNote = (id: string) => {
     const editor = noteEditors[id];
-    if (editor) writeClipboard(editor.getText());
+    if (editor) writeClipboard(editor.state.doc.toString());
   };
 
-  const registerEditor = React.useCallback((id: string, editor: Editor | null) => {
+  const copyNoteSelection = (id: string) => {
+    const editor = noteEditors[id];
+    if (!editor) return;
+    const { from, to } = editor.state.selection.main;
+    writeClipboard(from === to ? editor.state.doc.toString() : editor.state.sliceDoc(from, to));
+  };
+
+  const pasteNote = async (id: string) => {
+    const editor = noteEditors[id];
+    if (!editor) return;
+    const text = await readClipboard();
+    if (!text) return;
+    const { from, to } = editor.state.selection.main;
+    editor.dispatch({ changes: { from, to, insert: text }, selection: { anchor: from + text.length } });
+    editor.focus();
+  };
+
+  const registerEditor = React.useCallback((id: string, editor: EditorView | null) => {
     setNoteEditors((prev) => {
       if (editor) return { ...prev, [id]: editor };
       const next = { ...prev };
@@ -417,6 +440,9 @@ const Canvas = () => {
               onNoteEditor={registerEditor}
               onNoteTitle={setNoteTitle}
               onCopyNote={copyNote}
+              onCopyNoteSelection={copyNoteSelection}
+              onPasteNote={pasteNote}
+              onToggleRaw={toggleNoteRaw}
               onRename={setTileTitle}
               onCopyPath={copyTilePath}
               onReveal={revealTilePath}

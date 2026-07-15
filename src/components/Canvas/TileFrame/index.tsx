@@ -1,6 +1,6 @@
 import React from 'react';
-import type { Editor } from '@tiptap/react';
-import { X, Pin, PinOff, Copy, Focus, Pencil, Trash2, ArrowUp, Maximize, Minimize, RotateCw, CopyPlus, ArrowDown, GitBranch, ChevronDown, FolderOpen, ClipboardCopy } from 'lucide-react';
+import type { EditorView } from '@codemirror/view';
+import { X, Pin, PinOff, Copy, Focus, Pencil, Trash2, ArrowUp, Maximize, Minimize, RotateCw, CopyPlus, ArrowDown, GitBranch, ChevronDown, FolderOpen, ClipboardCopy, ClipboardPaste } from 'lucide-react';
 
 import type { Tile, View } from '~/domain/interfaces/canvas.interface';
 import type { ContextMenuEntry } from '~/components/commons/ContextMenu';
@@ -45,9 +45,12 @@ interface TileFrameProps {
   onCwd: (id: string, cwd: string, branch?: string) => void;
   onOscTitle: (id: string, title: string) => void;
   onNoteChange: (id: string, content: string) => void;
-  onNoteEditor: (id: string, editor: Editor | null) => void;
+  onNoteEditor: (id: string, editor: EditorView | null) => void;
   onNoteTitle: (id: string, title: string) => void;
   onCopyNote: (id: string) => void;
+  onCopyNoteSelection: (id: string) => void;
+  onPasteNote: (id: string) => void;
+  onToggleRaw: (id: string) => void;
   onRename: (id: string, title: string) => void;
   onCopyPath: (id: string) => void;
   onReveal: (id: string) => void;
@@ -65,7 +68,7 @@ const devicePx = (v: number): number => {
   return Math.round(v * dpr) / dpr;
 };
 
-const TileFrame = ({ tile, view, active, selected, alert, visible, live, hidden, fullscreen, exiting, vpW, vpH, onMove, onSnap, onClose, onResize, onActivate, onFocusTile, onToggleFullscreen, onCwd, onOscTitle, onNoteChange, onNoteEditor, onNoteTitle, onCopyNote, onRename, onCopyPath, onReveal, onDuplicate, onTogglePin, onToggleSelect }: TileFrameProps) => {
+const TileFrame = ({ tile, view, active, selected, alert, visible, live, hidden, fullscreen, exiting, vpW, vpH, onMove, onSnap, onClose, onResize, onActivate, onFocusTile, onToggleFullscreen, onCwd, onOscTitle, onNoteChange, onNoteEditor, onNoteTitle, onCopyNote, onCopyNoteSelection, onPasteNote, onToggleRaw, onRename, onCopyPath, onReveal, onDuplicate, onTogglePin, onToggleSelect }: TileFrameProps) => {
   const k = view.k;
   const drag = React.useRef<{ sx: number; sy: number; ox: number; oy: number } | null>(null);
   const resize = React.useRef<{ x: number; y: number; dir: string } | null>(null);
@@ -137,19 +140,24 @@ const TileFrame = ({ tile, view, active, selected, alert, visible, live, hidden,
   const noteTint = tint ? { background: tint.body, color: tint.text } : null;
   const noteLabel = note ? tile.userTitle?.trim() || 'Note' : null;
   const copyNote = () => onCopyNote(tile.id);
+  const copyNoteSelection = () => onCopyNoteSelection(tile.id);
+  const pasteNote = () => onPasteNote(tile.id);
+  const toggleRaw = () => onToggleRaw(tile.id);
   const stopDrag = (e: React.PointerEvent) => e.stopPropagation();
 
   const [menu, setMenu] = React.useState<{ x: number; y: number } | null>(null);
+  const [menuInContent, setMenuInContent] = React.useState(false);
   const [renaming, setRenaming] = React.useState(false);
   const [draft, setDraft] = React.useState('');
   const renameRef = React.useRef<HTMLInputElement>(null);
 
   const closeMenu = () => setMenu(null);
-  const openMenu = (e: React.MouseEvent) => {
-    if (note || fullscreen) return;
+  const openMenu = (e: React.MouseEvent, inContent = false) => {
+    if (fullscreen) return;
     e.preventDefault();
     e.stopPropagation();
     onActivate(tile.id);
+    setMenuInContent(inContent);
     setMenu({ x: e.clientX, y: e.clientY });
   };
 
@@ -204,35 +212,61 @@ const TileFrame = ({ tile, view, active, selected, alert, visible, live, hidden,
     setBranchLocal({ x: (btn.left - tileRect.left) / scale, y: (btn.bottom - tileRect.top) / scale + 4 });
   };
 
-  const menuItems: ContextMenuEntry[] = [
+  const fullscreenItem: ContextMenuEntry = {
+    label: fullscreen ? 'Exit fullscreen' : 'Fullscreen',
+    icon: fullscreen ? <Minimize size={15} strokeWidth={1.75} /> : <Maximize size={15} strokeWidth={1.75} />,
+    shortcut: formatCombo(getBinding('tile.fullscreen')),
+    onSelect: toggleFullscreen
+  };
+  const pinItem: ContextMenuEntry = {
+    label: tile.pinned ? 'Unpin' : 'Pin',
+    icon: tile.pinned ? <PinOff size={15} strokeWidth={1.75} /> : <Pin size={15} strokeWidth={1.75} />,
+    onSelect: togglePin
+  };
+  const closeItem: ContextMenuEntry = {
+    label: 'Close',
+    icon: <Trash2 size={15} strokeWidth={1.75} />,
+    shortcut: formatCombo(getBinding('tile.close')),
+    danger: true,
+    onSelect: closeTile
+  };
+
+  const noteContentItems: ContextMenuEntry[] = menuInContent
+    ? [
+        { label: 'Copy', icon: <Copy size={15} strokeWidth={1.75} />, onSelect: copyNoteSelection },
+        { label: 'Paste', icon: <ClipboardPaste size={15} strokeWidth={1.75} />, onSelect: pasteNote },
+        'separator'
+      ]
+    : [];
+
+  const noteMenuItems: ContextMenuEntry[] = [
+    ...noteContentItems,
     { label: 'Rename', icon: <Pencil size={15} strokeWidth={1.75} />, onSelect: startRename },
     { label: 'Duplicate', icon: <CopyPlus size={15} strokeWidth={1.75} />, onSelect: duplicate },
-    {
-      label: tile.pinned ? 'Unpin' : 'Pin',
-      icon: tile.pinned ? <PinOff size={15} strokeWidth={1.75} /> : <Pin size={15} strokeWidth={1.75} />,
-      onSelect: togglePin
-    },
+    pinItem,
     'separator',
-    { label: 'Reveal in explorer', icon: <FolderOpen size={15} strokeWidth={1.75} />, onSelect: reveal, disabled: !tile.cwd },
-    { label: 'Copy path', icon: <ClipboardCopy size={15} strokeWidth={1.75} />, onSelect: copyPath, disabled: !tile.cwd },
-    'separator',
-    { label: 'Restart terminal', icon: <RotateCw size={15} strokeWidth={1.75} />, onSelect: restartTile },
     { label: 'Focus', icon: <Focus size={15} strokeWidth={1.75} />, onSelect: focusTile },
-    {
-      label: fullscreen ? 'Exit fullscreen' : 'Fullscreen',
-      icon: fullscreen ? <Minimize size={15} strokeWidth={1.75} /> : <Maximize size={15} strokeWidth={1.75} />,
-      shortcut: formatCombo(getBinding('tile.fullscreen')),
-      onSelect: toggleFullscreen
-    },
+    fullscreenItem,
     'separator',
-    {
-      label: 'Close',
-      icon: <Trash2 size={15} strokeWidth={1.75} />,
-      shortcut: formatCombo(getBinding('tile.close')),
-      danger: true,
-      onSelect: closeTile
-    }
+    closeItem
   ];
+
+  const menuItems: ContextMenuEntry[] = note
+    ? noteMenuItems
+    : [
+        { label: 'Rename', icon: <Pencil size={15} strokeWidth={1.75} />, onSelect: startRename },
+        { label: 'Duplicate', icon: <CopyPlus size={15} strokeWidth={1.75} />, onSelect: duplicate },
+        pinItem,
+        'separator',
+        { label: 'Reveal in explorer', icon: <FolderOpen size={15} strokeWidth={1.75} />, onSelect: reveal, disabled: !tile.cwd },
+        { label: 'Copy path', icon: <ClipboardCopy size={15} strokeWidth={1.75} />, onSelect: copyPath, disabled: !tile.cwd },
+        'separator',
+        { label: 'Restart terminal', icon: <RotateCw size={15} strokeWidth={1.75} />, onSelect: restartTile },
+        { label: 'Focus', icon: <Focus size={15} strokeWidth={1.75} />, onSelect: focusTile },
+        fullscreenItem,
+        'separator',
+        closeItem
+      ];
 
   const inset = TILE_GAP / 2;
   const ek = fullscreen ? 1 : k;
@@ -321,11 +355,22 @@ const TileFrame = ({ tile, view, active, selected, alert, visible, live, hidden,
           )}
           <div className={styles.actions}>
             {note && (
+              <button
+                className={tile.renderOnly ? `${styles.action} ${styles.rawOn}` : styles.action}
+                onClick={toggleRaw}
+                aria-label={tile.renderOnly ? 'Show markdown on edit' : 'Rendered only'}
+                data-tooltip={tile.renderOnly ? 'Rendered' : 'Live edit'}
+                style={tint ? ({ ['--note-body' as string]: tint.body, ['--note-text' as string]: tint.text }) : undefined}
+              >
+                <span className={styles.rawGlyph}>M</span>
+              </button>
+            )}
+            {note && (
               <button className={styles.action} onClick={copyNote} aria-label="Copy note">
                 <Copy size={13} strokeWidth={2} />
               </button>
             )}
-            {!fullscreen && (
+            {!note && !fullscreen && (
               <button
                 className={tile.pinned ? `${styles.action} ${styles.pinned}` : styles.action}
                 onClick={togglePin}
@@ -334,9 +379,11 @@ const TileFrame = ({ tile, view, active, selected, alert, visible, live, hidden,
                 {tile.pinned ? <PinOff size={13} strokeWidth={2} /> : <Pin size={13} strokeWidth={2} />}
               </button>
             )}
-            <button className={styles.action} onClick={toggleFullscreen} aria-label="Toggle fullscreen">
-              {fullscreen ? <Minimize size={13} strokeWidth={2} /> : <Maximize size={13} strokeWidth={2} />}
-            </button>
+            {!note && (
+              <button className={styles.action} onClick={toggleFullscreen} aria-label="Toggle fullscreen">
+                {fullscreen ? <Minimize size={13} strokeWidth={2} /> : <Maximize size={13} strokeWidth={2} />}
+              </button>
+            )}
             {!note && !code && (
               <button className={styles.action} onClick={restartTile} aria-label="Restart terminal">
                 <RotateCw size={13} strokeWidth={2} />
@@ -349,7 +396,7 @@ const TileFrame = ({ tile, view, active, selected, alert, visible, live, hidden,
             )}
           </div>
         </div>
-        <div className={styles.body}>
+        <div className={styles.body} onContextMenu={note ? (e) => openMenu(e, true) : undefined}>
           {note && (
             <NoteTile tile={tile} active={active} onChange={onNoteChange} onActivate={onActivate} onEditor={onNoteEditor} />
           )}
@@ -384,6 +431,7 @@ const TileFrame = ({ tile, view, active, selected, alert, visible, live, hidden,
             tileId={tile.id}
             cols={termCols}
             rows={termRows}
+            onContextMenu={openMenu}
           />
         </div>
       )}

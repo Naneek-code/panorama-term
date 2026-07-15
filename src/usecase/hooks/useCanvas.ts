@@ -75,6 +75,7 @@ export const useCanvas = ({ seed, onPersist }: UseCanvasArgs) => {
   const [selected, setSelected] = React.useState<Set<string>>(() => new Set());
   const [marquee, setMarquee] = React.useState<{ x: number; y: number; width: number; height: number } | null>(null);
 
+  const noteRenderDefault = React.useRef(false);
   const bgRef = React.useRef<HTMLDivElement>(null);
   const gridRef = React.useRef<HTMLCanvasElement>(null);
   const indicatorRef = React.useRef<HTMLDivElement>(null);
@@ -216,6 +217,7 @@ export const useCanvas = ({ seed, onPersist }: UseCanvasArgs) => {
           height: NOTE_HEIGHT,
           color: NOTE_DEFAULT_COLOR,
           content: '',
+          renderOnly: noteRenderDefault.current,
           zIndex: prev.reduce((m, t) => Math.max(m, t.zIndex), 0) + 1
         }
       ]);
@@ -397,8 +399,6 @@ export const useCanvas = ({ seed, onPersist }: UseCanvasArgs) => {
   }, []);
 
   const onWheel = (e: React.WheelEvent) => {
-    const tileEl = (e.target as Element).closest('[data-tile]');
-    if (tileEl && tileEl.getAttribute('data-tile') === activeTile) return;
     if (e.shiftKey) {
       setView((v) => ({ ...v, x: v.x - (e.deltaX || e.deltaY) * 1.2 }));
       return;
@@ -407,6 +407,8 @@ export const useCanvas = ({ seed, onPersist }: UseCanvasArgs) => {
       setView((v) => ({ ...v, x: v.x - e.deltaX * 1.2, y: v.y - e.deltaY * 1.2 }));
       return;
     }
+    const tileEl = (e.target as Element).closest('[data-tile]');
+    if (tileEl && tileEl.getAttribute('data-tile') === activeTile) return;
     cancelAnimationFrame(snapRaf.current);
     snapRaf.current = 0;
     clearTimeout(snapTimer.current);
@@ -699,6 +701,7 @@ export const useCanvas = ({ seed, onPersist }: UseCanvasArgs) => {
     toggleSelect,
     clearSelection,
     addNote,
+    noteRenderDefault,
     focusTile,
     focusFrame,
     gridRef,

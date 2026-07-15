@@ -32,6 +32,7 @@ interface GridTerminalProps {
   onAgentActive?: (type: AgentType | null) => void;
   onClaudeStatus?: (status: string) => void;
   onProgress?: (state: number, pct: number) => void;
+  onContextMenu?: (e: React.MouseEvent) => void;
 }
 
 const FONT = 12;
@@ -533,7 +534,7 @@ const GridTerminal = ({ tileId, cwd, cols, rows, active, visible, k, restartKey,
         return;
       }
     }
-    if (ws && frame && frame.mouseMode > 0 && !e.shiftKey) {
+    if (ws && frame && frame.mouseMode > 0 && !e.shiftKey && e.button !== 1) {
       e.stopPropagation();
       canvasRef.current?.setPointerCapture(e.pointerId);
       mouseFwdRef.current = true;
@@ -704,6 +705,7 @@ const GridTerminal = ({ tileId, cwd, cols, rows, active, visible, k, restartKey,
         onPointerMove={onPointerMove}
         onPointerLeave={onPointerLeave}
         onPointerCancel={onPointerUp}
+        onContextMenu={onContextMenu}
         className={styles.wasm}
       />
       <div className={styles.agentScale} style={{ width: `calc(100% / ${k})`, height: `calc(100% / ${k})`, transform: `scale(${k})` }}>

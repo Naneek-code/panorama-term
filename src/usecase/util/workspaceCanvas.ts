@@ -1,5 +1,6 @@
 import type { View } from '~/domain/interfaces/canvas.interface';
 import type { Tile, Frame, CanvasState, Viewport } from '~/domain/interfaces/workspace.interface';
+import { isLegacyHtml, htmlToMarkdown } from '~/usecase/util/tiptapMigrate';
 
 export interface RuntimeCanvas {
   view: View;
@@ -19,8 +20,10 @@ const viewportFromView = (view: View): Viewport => {
   return { zoom: view.k, centerX: (w / 2 - view.x) / view.k, centerY: (h / 2 - view.y) / view.k };
 };
 
+const migrateTile = (tile: Tile): Tile => (tile.type === 'note' && isLegacyHtml(tile.content) ? { ...tile, content: htmlToMarkdown(tile.content!) } : tile);
+
 export const toRuntime = (state: CanvasState): RuntimeCanvas => ({
-  tiles: state.tiles ?? [],
+  tiles: (state.tiles ?? []).map(migrateTile),
   frames: state.frames ?? [],
   view: viewFromViewport(state.viewport)
 });

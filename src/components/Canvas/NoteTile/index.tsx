@@ -1,55 +1,86 @@
 import React from 'react';
-import StarterKit from '@tiptap/starter-kit';
-import TextAlign from '@tiptap/extension-text-align';
-import Placeholder from '@tiptap/extension-placeholder';
-import { TaskList, TaskItem } from '@tiptap/extension-list';
-import { useEditor, EditorContent, type Editor } from '@tiptap/react';
+import { EditorView, keymap, placeholder } from '@codemirror/view';
+import { EditorState, Compartment } from '@codemirror/state';
+import { history, defaultKeymap, historyKeymap, indentWithTab } from '@codemirror/commands';
 
 import type { Tile } from '~/domain/interfaces/canvas.interface';
 import { noteTheme } from '~/usecase/util/note';
+import { livePreview, markdownBase } from '~/usecase/util/markdownLivePreview';
 
 import styles from './styles.module.scss';
-import './content.scss';
 
 interface NoteTileProps {
   tile: Tile;
   active: boolean;
   onChange: (id: string, content: string) => void;
   onActivate: (id: string) => void;
-  onEditor: (id: string, editor: Editor | null) => void;
+  onEditor: (id: string, editor: EditorView | null) => void;
 }
 
-const EXTENSIONS = [
-  StarterKit,
-  TaskList,
-  TaskItem.configure({ nested: true }),
-  TextAlign.configure({ types: ['heading', 'paragraph'] }),
-  Placeholder.configure({ placeholder: 'Click to edit...' })
-];
+const theme = EditorView.theme({
+  '&': { height: '100%', fontSize: '13px', color: 'var(--note-text)', background: 'transparent' },
+  '.cm-content': { padding: '8px 10px', lineHeight: '1.5', caretColor: 'var(--note-text)' },
+  '.cm-scroller': { fontFamily: 'inherit', lineHeight: '1.5' },
+  '&.cm-focused': { outline: 'none' },
+  '.cm-cursor': { borderLeftColor: 'var(--note-text)' },
+  '.cm-placeholder': { color: 'var(--note-text)', opacity: '0.5' },
+  '.cm-scroller::-webkit-scrollbar': { width: '8px' },
+  '.cm-scroller::-webkit-scrollbar-track': { background: 'transparent' },
+  '.cm-scroller::-webkit-scrollbar-thumb': {
+    borderRadius: '4px',
+    background: 'color-mix(in srgb, var(--note-text) 30%, transparent)'
+  },
+  '.cm-scroller::-webkit-scrollbar-thumb:hover': { background: 'color-mix(in srgb, var(--note-text) 50%, transparent)' },
+  '.cm-scroller::-webkit-scrollbar-button': { display: 'none' }
+});
 
 const NoteTile = ({ tile, active, onChange, onActivate, onEditor }: NoteTileProps) => {
+  const host = React.useRef<HTMLDivElement | null>(null);
+  const view = React.useRef<EditorView | null>(null);
+  const preview = React.useRef(new Compartment());
   const save = React.useRef<ReturnType<typeof setTimeout> | null>(null);
-
-  const editor = useEditor({
-    extensions: EXTENSIONS,
-    content: tile.content || '',
-    onUpdate: ({ editor: e }) => {
-      if (save.current) clearTimeout(save.current);
-      save.current = setTimeout(() => onChange(tile.id, e.getHTML()), 300);
-    }
-  });
+  const emit = React.useRef(onChange);
+  emit.current = onChange;
 
   React.useEffect(() => {
-    onEditor(tile.id, editor);
-    return () => onEditor(tile.id, null);
-  }, [tile.id, editor, onEditor]);
+    if (!host.current) return;
 
-  React.useEffect(
-    () => () => {
+    const editor = new EditorView({
+      parent: host.current,
+      state: EditorState.create({
+        doc: tile.content || '',
+        extensions: [
+          history(),
+          keymap.of([...defaultKeymap, ...historyKeymap, indentWithTab]),
+          markdownBase(),
+          preview.current.of(livePreview(tile.renderOnly ? 'render' : 'edit')),
+          EditorView.lineWrapping,
+          placeholder('Click to edit...'),
+          theme,
+          EditorView.updateListener.of((u) => {
+            if (!u.docChanged) return;
+            if (save.current) clearTimeout(save.current);
+            const text = u.state.doc.toString();
+            save.current = setTimeout(() => emit.current(tile.id, text), 300);
+          })
+        ]
+      })
+    });
+
+    view.current = editor;
+    onEditor(tile.id, editor);
+
+    return () => {
       if (save.current) clearTimeout(save.current);
-    },
-    []
-  );
+      onEditor(tile.id, null);
+      editor.destroy();
+      view.current = null;
+    };
+  }, [tile.id, onEditor]);
+
+  React.useEffect(() => {
+    view.current?.dispatch({ effects: preview.current.reconfigure(livePreview(tile.renderOnly ? 'render' : 'edit')) });
+  }, [tile.renderOnly]);
 
   const activate = (e: React.PointerEvent) => {
     if (e.button !== 0) return;
@@ -61,7 +92,7 @@ const NoteTile = ({ tile, active, onChange, onActivate, onEditor }: NoteTileProp
   };
 
   const tint = noteTheme(tile.color);
-  const editorCls = active ? `${styles.editor} ${styles.scrollable}` : styles.editor;
+  const cls = active ? `${styles.editor} ${styles.scrollable}` : styles.editor;
 
   return (
     <div
@@ -73,7 +104,7 @@ const NoteTile = ({ tile, active, onChange, onActivate, onEditor }: NoteTileProp
         ['--note-text' as string]: tint.text
       }}
     >
-      <EditorContent editor={editor} className={editorCls} />
+      <div ref={host} className={cls} />
     </div>
   );
 };

@@ -21,6 +21,7 @@ export interface Tile {
   color?: string;
   content?: string;
   pinned?: boolean;
+  renderOnly?: boolean;
 }
 
 export interface Frame {
