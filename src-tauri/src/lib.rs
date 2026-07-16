@@ -413,6 +413,8 @@ pub fn run() {
             git::git_status,
             git::git_commit,
             git::git_log_messages,
+            git::git_log_graph,
+            git::git_remote_url,
             git::git_unpushed_commits,
             git::git_diff_file,
             git::git_add_ignore,
