@@ -7,9 +7,9 @@ import type { ContextMenuEntry } from '~/components/commons/ContextMenu';
 import ContextMenu from '~/components/commons/ContextMenu';
 import { commitUrl } from '~/usecase/util/gitRemote';
 import { openUrl } from '~/adapter/shell/shell.client';
-import { gitLogGraph, gitRemoteUrl } from '~/adapter/git/git.client';
+import { gitLogGraph, gitRemoteUrl, gitUnpushedCommits } from '~/adapter/git/git.client';
 import { writeClipboard } from '~/adapter/clipboard/clipboard.client';
-import { graphColor, buildCommitGraph } from '~/usecase/util/commitGraph';
+import { graphColor, graphColorLocal, buildCommitGraph } from '~/usecase/util/commitGraph';
 
 import styles from './styles.module.scss';
 
@@ -58,23 +58,34 @@ const edgePath = (edge: GraphEdge, height: number): string => {
 interface LaneCellProps {
   row: GraphRow;
   height: number;
+  head?: boolean;
+  local?: boolean;
+  childLocal?: boolean;
 }
 
-const LaneCell = ({ row, height }: LaneCellProps) => {
+const isLocalEdge = (edge: GraphEdge, row: GraphRow, local?: boolean, childLocal?: boolean): boolean => {
+  if (edge.fromLane !== row.lane && edge.toLane !== row.lane) return false;
+  return edge.kind === 'in' ? Boolean(childLocal) : Boolean(local);
+};
+
+const LaneCell = ({ row, height, head, local, childLocal }: LaneCellProps) => {
   const width = row.width * COL;
+  const color = local ? graphColorLocal(row.color) : graphColor(row.color);
+  const x = laneX(row.lane);
   return (
     <svg className={styles.graph} width={width} height={height} viewBox={`0 0 ${width} ${height}`}>
       {row.edges.map((edge) => (
         <path
           key={`${edge.kind}-${edge.fromLane}-${edge.toLane}`}
           d={edgePath(edge, height)}
-          stroke={graphColor(edge.color)}
+          stroke={isLocalEdge(edge, row, local, childLocal) ? graphColorLocal(edge.color) : graphColor(edge.color)}
           strokeWidth={1.5}
           strokeLinecap="round"
           fill="none"
         />
       ))}
-      <circle cx={laneX(row.lane)} cy={height / 2} r={DOT} fill={graphColor(row.color)} />
+      {head && <circle cx={x} cy={height / 2} r={DOT + 1.6} stroke={color} strokeWidth={1.2} fill="none" />}
+      <circle cx={x} cy={height / 2} r={DOT} fill={color} />
     </svg>
   );
 };
@@ -87,10 +98,14 @@ const History = ({ root }: HistoryProps) => {
   const [busy, setBusy] = React.useState(false);
   const [wide, setWide] = React.useState(true);
   const [remote, setRemote] = React.useState<string | null>(null);
+  const [local, setLocal] = React.useState<Set<string>>(() => new Set());
   const [menu, setMenu] = React.useState<{ x: number; y: number; row: LogRow } | null>(null);
 
   const load = React.useCallback(() => {
     setBusy(true);
+    gitUnpushedCommits(root)
+      .then((ahead) => setLocal(new Set(ahead.map((entry) => entry.short))))
+      .catch(() => setLocal(new Set()));
     gitLogGraph(root, limit)
       .then((next) => {
         setRows(next);
@@ -117,6 +132,8 @@ const History = ({ root }: HistoryProps) => {
   }, [rows]);
 
   const graph = React.useMemo(() => (rows ? buildCommitGraph(rows) : []), [rows]);
+
+  const headAt = React.useMemo(() => (rows ? rows.findIndex((row) => /(^|, )HEAD( ->|,|$)/.test(row.refs)) : -1), [rows]);
 
   const more = () => setLimit((prev) => prev + PAGE);
 
@@ -182,8 +199,15 @@ const History = ({ root }: HistoryProps) => {
               onContextMenu={menuAt}
               data-wide={wide || undefined}
               data-merge={row.parents.length > 1 || undefined}
+              data-head={at === headAt || undefined}
             >
-              <LaneCell row={graph[at]} height={height} />
+              <LaneCell
+                row={graph[at]}
+                height={height}
+                head={at === headAt}
+                local={local.has(row.short)}
+                childLocal={at > 0 && local.has(rows[at - 1].short)}
+              />
               <div className={styles.body}>
                 <span className={styles.subject} title={row.message}>
                   {subject(row)}

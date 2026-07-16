@@ -86,6 +86,13 @@
     background: var(--hover-1);
   }
 
+  &[data-head] {
+    .refs {
+      color: var(--text-strong);
+      background: var(--hover-3);
+    }
+  }
+
   &[data-merge] {
     .subject,
     .author,

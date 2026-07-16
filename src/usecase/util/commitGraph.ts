@@ -41,6 +41,8 @@ const hue = (color: number): number => {
 
 export const graphColor = (color: number): string => `hsl(${hue(color)} ${SATURATION}% ${LIGHTNESS}%)`;
 
+export const graphColorLocal = (color: number): string => `hsl(${(hue(color) + 180) % 360} 72% 62%)`;
+
 const headRef = (refs: string): string | null => {
   for (const raw of refs.split(',')) {
     const name = raw.trim().replace(/^HEAD -> /, '');
