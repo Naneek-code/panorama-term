@@ -15,6 +15,40 @@ use tokio_tungstenite::tungstenite::Message;
 use tokio_tungstenite::WebSocketStream;
 
 const PORT: u16 = 9777;
+const DAEMON_ARG: &str = "--daemon";
+
+fn port() -> u16 {
+    std::env::var("PANORAMA_SIDECAR_PORT")
+        .ok()
+        .and_then(|v| v.parse().ok())
+        .unwrap_or(PORT)
+}
+
+#[cfg(windows)]
+fn daemonize() {
+    use std::os::windows::process::CommandExt;
+    use std::process::{Command, Stdio};
+    const DETACHED_PROCESS: u32 = 0x0000_0008;
+    const CREATE_NEW_PROCESS_GROUP: u32 = 0x0000_0200;
+    const CREATE_BREAKAWAY_FROM_JOB: u32 = 0x0100_0000;
+    let Ok(exe) = std::env::current_exe() else {
+        return;
+    };
+    let base = DETACHED_PROCESS | CREATE_NEW_PROCESS_GROUP;
+    for flags in [base | CREATE_BREAKAWAY_FROM_JOB, base] {
+        let spawned = Command::new(&exe)
+            .arg(DAEMON_ARG)
+            .stdin(Stdio::null())
+            .stdout(Stdio::null())
+            .stderr(Stdio::null())
+            .creation_flags(flags)
+            .spawn()
+            .is_ok();
+        if spawned {
+            std::process::exit(0);
+        }
+    }
+}
 const DEFAULT_FG: u32 = 0xC7_D0_E0;
 const DEFAULT_BG: u32 = 0x0B_0E_14;
 
@@ -795,7 +829,7 @@ fn post_agent_status(input: &str) {
     if input.len() > STATUS_POST_MAX {
         return;
     }
-    let addr: std::net::SocketAddr = "127.0.0.1:9777".parse().unwrap();
+    let addr: std::net::SocketAddr = format!("127.0.0.1:{}", port()).parse().unwrap();
     let Ok(mut stream) = std::net::TcpStream::connect_timeout(&addr, Duration::from_millis(200)) else {
         return;
     };
@@ -2407,10 +2441,14 @@ async fn main() {
         statusline_cmd();
         return;
     }
+    #[cfg(windows)]
+    if std::env::args().nth(1).as_deref() != Some(DAEMON_ARG) {
+        daemonize();
+    }
     install_claude_hook();
-    let listener = TcpListener::bind(("127.0.0.1", PORT))
+    let listener = TcpListener::bind(("127.0.0.1", port()))
         .await
-        .expect("bind 9777");
+        .expect("bind sidecar port");
     tokio::spawn(async {
         let mut tick = tokio::time::interval(Duration::from_secs(5));
         loop {
