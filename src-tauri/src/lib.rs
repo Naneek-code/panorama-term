@@ -133,6 +133,20 @@ fn create_notif_window(app: &tauri::AppHandle) -> tauri::Result<()> {
     Ok(())
 }
 
+fn spawn_notif_topmost_guard(app: tauri::AppHandle) {
+    std::thread::spawn(move || loop {
+        std::thread::sleep(Duration::from_millis(700));
+        match app.get_webview_window("notif") {
+            Some(notif) => {
+                if notif.is_visible().unwrap_or(false) {
+                    let _ = notif.set_always_on_top(true);
+                }
+            }
+            None => break,
+        }
+    });
+}
+
 #[tauri::command]
 fn notif_layout(app: tauri::AppHandle, height: f64) -> Result<(), String> {
     let win = app.get_webview_window("notif").ok_or("no overlay window")?;
@@ -349,6 +363,7 @@ pub fn run() {
         .setup(|app| {
             spawn_sidecar();
             create_notif_window(app.handle())?;
+            spawn_notif_topmost_guard(app.handle().clone());
             notes::start_notes_watch(app.handle().clone());
             Ok(())
         })
