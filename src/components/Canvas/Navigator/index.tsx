@@ -84,7 +84,7 @@ const savedTab = (): Tab => {
   return TABS.includes(raw as Tab) ? (raw as Tab) : 'files';
 };
 const MIN_WIDTH = 200;
-const MAX_WIDTH = 560;
+const MAX_WIDTH = 800;
 
 const savedWidth = (): number => {
   const raw = Number(localStorage.getItem(WIDTH_KEY));
