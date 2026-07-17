@@ -9,6 +9,7 @@ mod git;
 mod store;
 mod docker;
 mod notes;
+mod claude;
 
 const SIDECAR_PORT: u16 = 9777;
 const NOTIF_WIDTH: f64 = 448.0;
@@ -430,7 +431,8 @@ pub fn run() {
             notes::unlink_note,
             notes::read_note,
             notes::write_note,
-            notes::delete_note
+            notes::delete_note,
+            claude::claude_session_summary
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

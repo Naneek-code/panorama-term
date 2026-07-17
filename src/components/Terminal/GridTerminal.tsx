@@ -1,11 +1,13 @@
 import React from 'react';
 
 import AgentBar from '~/components/Terminal/AgentBar';
+import ResumePanel from '~/components/Terminal/ResumePanel';
 import { termTheme, THEME_EVENT } from '~/usecase/util/theme';
 import { getSetting } from '~/adapter/settings/settings.client';
 import { scheduleConnect } from '~/usecase/util/connectScheduler';
 import { TERMINAL_TARGET_KEY } from '~/usecase/util/terminalTarget';
 import { keyToBytes } from '~/usecase/util/terminalKeys';
+import { looksLikeClaude } from '~/components/Terminal/AgentBar/parse';
 import { notifyClaude, clearNotify } from '~/components/commons/Notifications/bridge';
 import { openUrl } from '~/adapter/shell/shell.client';
 import { urlSpanAt, orderSel, selectText, lineSelection, wordSelection } from '~/usecase/util/terminalSelection';
@@ -44,6 +46,32 @@ const NOTIFY_IDLE_GRACE_MS = 10000;
 const DEFAULT_FG = 0xc7d0e0;
 const QUAD = [0b0010, 0b0001, 0b1000, 0b1011, 0b1001, 0b1110, 0b1101, 0b0100, 0b0110, 0b0111];
 const NO_LINES: string[] = [];
+
+const skipKey = (tileId: string): string => `panorama:resume-skip:${tileId}`;
+
+const resumeSkipped = (tileId: string, sessionId: string): boolean => {
+  try {
+    return localStorage.getItem(skipKey(tileId)) === sessionId;
+  } catch {
+    return false;
+  }
+};
+
+const markResumeSkipped = (tileId: string, sessionId: string): void => {
+  try {
+    localStorage.setItem(skipKey(tileId), sessionId);
+  } catch {
+    void 0;
+  }
+};
+
+const clearResumeSkip = (tileId: string): void => {
+  try {
+    localStorage.removeItem(skipKey(tileId));
+  } catch {
+    void 0;
+  }
+};
 
 let cellW = 7.23;
 let fontReady = false;
@@ -92,6 +120,7 @@ const fgOf = (w0: number): string => {
 };
 
 const GridTerminal = ({ tileId, cwd, cols, rows, active, visible, k, restartKey, onCwd, onOscTitle, onClaudeActive, onClaudeStatus, onClaudeDiff, onProgress, onContextMenu }: GridTerminalProps) => {
+  const [resumeId, setResumeId] = React.useState<string | null>(null);
   const canvasRef = React.useRef<HTMLCanvasElement>(null);
   const wsRef = React.useRef<WebSocket | null>(null);
   const frameRef = React.useRef<GridFrame | null>(null);
@@ -108,6 +137,7 @@ const GridTerminal = ({ tileId, cwd, cols, rows, active, visible, k, restartKey,
   const lastFwdRef = React.useRef({ row: -1, col: -1 });
   const wheelAccRef = React.useRef(0);
   const pendingResumeRef = React.useRef(true);
+  const resumeCandidateRef = React.useRef<string | null>(null);
   const prevKRef = React.useRef(k);
   const maskRef = React.useRef(false);
   const prevDimsRef = React.useRef({ cols, rows });
@@ -344,6 +374,10 @@ const GridTerminal = ({ tileId, cwd, cols, rows, active, visible, k, restartKey,
           onGrid: (frame) => {
             frameRef.current = frame;
             dirtyRef.current = true;
+            const candidate = resumeCandidateRef.current;
+            if (!candidate) return;
+            resumeCandidateRef.current = null;
+            if (!looksLikeClaude(frame.lines.join('\n'))) setResumeId(candidate);
           },
           onExit: () => {},
           onClaude: (state) => {
@@ -398,12 +432,8 @@ const GridTerminal = ({ tileId, cwd, cols, rows, active, visible, k, restartKey,
             }
             if (!pendingResumeRef.current) return;
             pendingResumeRef.current = false;
-            if (!info.resumeId || info.reused) return;
-            const id = info.resumeId;
-            setTimeout(() => {
-              const w = wsRef.current;
-              if (w) sendPtyInput(w, ` claude --resume ${id}\r`);
-            }, 900);
+            if (!info.resumeId || resumeSkipped(tileId, info.resumeId)) return;
+            resumeCandidateRef.current = info.resumeId;
           }
         }
       );
@@ -452,6 +482,7 @@ const GridTerminal = ({ tileId, cwd, cols, rows, active, visible, k, restartKey,
     const ws = wsRef.current;
     if (!ws) return;
     pendingResumeRef.current = true;
+    clearResumeSkip(tileId);
     sendPtyKill(ws);
     ws.close();
   }, [restartKey]);
@@ -732,6 +763,18 @@ const GridTerminal = ({ tileId, cwd, cols, rows, active, visible, k, restartKey,
 
   const focusTerminal = React.useCallback(() => canvasRef.current?.focus({ preventScroll: true }), []);
 
+  const dismissResume = () => {
+    if (resumeId) markResumeSkipped(tileId, resumeId);
+    setResumeId(null);
+    focusTerminal();
+  };
+
+  const startResume = () => {
+    const ws = wsRef.current;
+    if (ws) sendPtyInput(ws, ` claude --resume ${resumeId}\r`);
+    dismissResume();
+  };
+
   return (
     <>
       <canvas
@@ -749,6 +792,9 @@ const GridTerminal = ({ tileId, cwd, cols, rows, active, visible, k, restartKey,
         className={styles.wasm}
       />
       <div className={styles.agentScale} style={{ width: `calc(100% / ${k})`, height: `calc(100% / ${k})`, transform: `scale(${k})` }}>
+        {resumeId && (
+          <ResumePanel sessionId={resumeId} cwd={cwd} active={active} onResume={startResume} onSkip={dismissResume} />
+        )}
         <AgentBar
           tileId={tileId}
           active={active}
