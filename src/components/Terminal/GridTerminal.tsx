@@ -47,6 +47,7 @@ const NOTIFY_IDLE_GRACE_MS = 10000;
 const DEFAULT_FG = 0xc7d0e0;
 const QUAD = [0b0010, 0b0001, 0b1000, 0b1011, 0b1001, 0b1110, 0b1101, 0b0100, 0b0110, 0b0111];
 const NO_LINES: string[] = [];
+const isLinux = /linux/i.test(navigator.userAgent);
 
 const skipKey = (tileId: string): string => `panorama:resume-skip:${tileId}`;
 
@@ -729,8 +730,7 @@ const GridTerminal = ({ tileId, cwd, cols, rows, active, visible, k, elevated, r
       return;
     }
     
-    // Let standard characters and dead keys pass through to the textarea for native OS composition.
-    if ((e.key.length === 1 && !e.ctrlKey && !e.metaKey && !e.altKey) || e.key === 'Dead') {
+    if (isLinux && ((e.key.length === 1 && !e.ctrlKey && !e.metaKey && !e.altKey) || e.key === 'Dead')) {
       return;
     }
 
@@ -791,8 +791,6 @@ const GridTerminal = ({ tileId, cwd, cols, rows, active, visible, k, elevated, r
   const getLines = React.useCallback(() => frameRef.current?.lines ?? NO_LINES, []);
 
   const getStructured = React.useCallback(() => claudeRef.current, []);
-
-  const isLinux = React.useMemo(() => /linux/i.test(navigator.userAgent), []);
 
   const onCanvasFocus = () => {
     if (isLinux) textareaRef.current?.focus({ preventScroll: true });
