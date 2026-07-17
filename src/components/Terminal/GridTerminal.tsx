@@ -12,7 +12,7 @@ import { notifyClaude, clearNotify } from '~/components/commons/Notifications/br
 import { openUrl } from '~/adapter/shell/shell.client';
 import { urlSpanAt, orderSel, selectText, lineSelection, wordSelection } from '~/usecase/util/terminalSelection';
 import { readClipboard, writeClipboard, hasClipboardImage } from '~/adapter/clipboard/clipboard.client';
-import { sendPtyKill, sendPtyMouse, sendPtyFocus, sendPtyInput, sendPtyScroll, sendPtyResize, sendPtyVisible, openPtyConnection } from '~/adapter/pty/pty.client';
+import { sendPtyKill, sendPtyMouse, sendPtyFocus, sendPtyInput, sendPtyScroll, sendPtyResize, sendPtyVisible, openPtyConnection, sendPtyDismissAgent } from '~/adapter/pty/pty.client';
 
 import type { GridFrame, ClaudeState } from '~/domain/interfaces/pty.interface';
 import type { Cell, Selection, UrlSpan } from '~/usecase/util/terminalSelection';
@@ -21,6 +21,8 @@ import styles from './styles.module.scss';
 
 interface GridTerminalProps {
   tileId: string;
+  sessionId?: string;
+  readOnly?: boolean;
   cwd?: string;
   cols: number;
   rows: number;
@@ -48,32 +50,6 @@ const DEFAULT_FG = 0xc7d0e0;
 const QUAD = [0b0010, 0b0001, 0b1000, 0b1011, 0b1001, 0b1110, 0b1101, 0b0100, 0b0110, 0b0111];
 const NO_LINES: string[] = [];
 const isLinux = /linux/i.test(navigator.userAgent);
-
-const skipKey = (tileId: string): string => `panorama:resume-skip:${tileId}`;
-
-const resumeSkipped = (tileId: string, sessionId: string): boolean => {
-  try {
-    return localStorage.getItem(skipKey(tileId)) === sessionId;
-  } catch {
-    return false;
-  }
-};
-
-const markResumeSkipped = (tileId: string, sessionId: string): void => {
-  try {
-    localStorage.setItem(skipKey(tileId), sessionId);
-  } catch {
-    void 0;
-  }
-};
-
-const clearResumeSkip = (tileId: string): void => {
-  try {
-    localStorage.removeItem(skipKey(tileId));
-  } catch {
-    void 0;
-  }
-};
 
 let cellW = 7.23;
 let fontReady = false;
@@ -121,7 +97,7 @@ const fgOf = (w0: number): string => {
   return termTheme.ansi?.get(v) ?? hex(v);
 };
 
-const GridTerminal = ({ tileId, cwd, cols, rows, active, visible, k, elevated, restartKey, onCwd, onOscTitle, onClaudeActive, onClaudeStatus, onClaudeDiff, onProgress, onContextMenu }: GridTerminalProps) => {
+const GridTerminal = ({ tileId, sessionId, readOnly, cwd, cols, rows, active, visible, k, elevated, restartKey, onCwd, onOscTitle, onClaudeActive, onClaudeStatus, onClaudeDiff, onProgress, onContextMenu }: GridTerminalProps) => {
   const [resumeId, setResumeId] = React.useState<string | null>(null);
   const canvasRef = React.useRef<HTMLCanvasElement>(null);
   const textareaRef = React.useRef<HTMLTextAreaElement>(null);
@@ -360,6 +336,7 @@ const GridTerminal = ({ tileId, cwd, cols, rows, active, visible, k, elevated, r
 
   React.useEffect(() => {
     let disposed = false;
+    let exited = false;
     let retry: ReturnType<typeof setTimeout> | undefined;
     const target = getSetting(TERMINAL_TARGET_KEY, 'auto');
     measureCell();
@@ -375,18 +352,29 @@ const GridTerminal = ({ tileId, cwd, cols, rows, active, visible, k, elevated, r
     const connect = () => {
       if (disposed) return;
       const ws = openPtyConnection(
-        { tileId, cwd, cols: colsRef.current, rows: rowsRef.current, target, elevated: elevatedRef.current },
+        {
+          tileId: sessionId ?? tileId,
+          cwd: readOnly ? undefined : cwd,
+          cols: colsRef.current,
+          rows: rowsRef.current,
+          target: readOnly ? undefined : target,
+          elevated: elevatedRef.current,
+          attach: readOnly
+        },
         {
           acceptGrid: () => visibleRef.current && !document.hidden,
           onGrid: (frame) => {
             frameRef.current = frame;
             dirtyRef.current = true;
+            if (readOnly) return;
             const candidate = resumeCandidateRef.current;
             if (!candidate) return;
             resumeCandidateRef.current = null;
             if (!looksLikeClaude(frame.lines.join('\n'))) setResumeId(candidate);
           },
-          onExit: () => {},
+          onExit: () => {
+            exited = true;
+          },
           onClaude: (state) => {
             const { reset, ...rest } = state;
             if (reset) statusRef.current = undefined;
@@ -439,14 +427,15 @@ const GridTerminal = ({ tileId, cwd, cols, rows, active, visible, k, elevated, r
             }
             if (!pendingResumeRef.current) return;
             pendingResumeRef.current = false;
-            if (!info.resumeId || resumeSkipped(tileId, info.resumeId)) return;
+            if (!info.resumeId) return;
             resumeCandidateRef.current = info.resumeId;
           }
         }
       );
       wsRef.current = ws;
       ws.onclose = () => {
-        if (!disposed) retry = setTimeout(() => scheduleConnect(connect, visibleRef.current ? 2 : 1), 2000);
+        if (disposed || (readOnly && exited)) return;
+        retry = setTimeout(() => scheduleConnect(connect, visibleRef.current ? 2 : 1), 2000);
       };
     };
     scheduleConnect(connect, visibleRef.current ? 2 : 0);
@@ -460,7 +449,7 @@ const GridTerminal = ({ tileId, cwd, cols, rows, active, visible, k, elevated, r
       wsRef.current = null;
       frameRef.current = null;
     };
-  }, [tileId, cwd, draw]);
+  }, [tileId, sessionId, readOnly, cwd, draw]);
 
   React.useEffect(() => {
     const prev = prevDimsRef.current;
@@ -489,7 +478,6 @@ const GridTerminal = ({ tileId, cwd, cols, rows, active, visible, k, elevated, r
     const ws = wsRef.current;
     if (!ws) return;
     pendingResumeRef.current = true;
-    clearResumeSkip(tileId);
     sendPtyKill(ws);
     ws.close();
   }, [restartKey]);
@@ -611,7 +599,7 @@ const GridTerminal = ({ tileId, cwd, cols, rows, active, visible, k, elevated, r
         return;
       }
     }
-    if (ws && frame && frame.mouseMode > 0 && !e.shiftKey && e.button !== 1) {
+    if (ws && frame && frame.mouseMode > 0 && !readOnly && !e.shiftKey && e.button !== 1) {
       e.stopPropagation();
       canvasRef.current?.setPointerCapture(e.pointerId);
       mouseFwdRef.current = true;
@@ -662,7 +650,7 @@ const GridTerminal = ({ tileId, cwd, cols, rows, active, visible, k, elevated, r
     if (!selectingRef.current || !selRef.current) {
       const ws = wsRef.current;
       const hoverFrame = frameRef.current;
-      if (ws && hoverFrame && hoverFrame.mouseMode === 4 && activeRef.current && !e.shiftKey) {
+      if (ws && hoverFrame && hoverFrame.mouseMode === 4 && !readOnly && activeRef.current && !e.shiftKey) {
         const cell = cellFromEvent(e);
         if (cell && (cell.row !== lastFwdRef.current.row || cell.col !== lastFwdRef.current.col)) {
           lastFwdRef.current = cell;
@@ -719,6 +707,7 @@ const GridTerminal = ({ tileId, cwd, cols, rows, active, visible, k, elevated, r
       return;
     }
     if (mod && key === 'v') {
+      if (readOnly) return;
       e.preventDefault();
       paste();
       return;
@@ -729,7 +718,9 @@ const GridTerminal = ({ tileId, cwd, cols, rows, active, visible, k, elevated, r
       clearSelection();
       return;
     }
-    
+
+    if (readOnly) return;
+
     if (isLinux && ((e.key.length === 1 && !e.ctrlKey && !e.metaKey && !e.altKey) || e.key === 'Dead')) {
       return;
     }
@@ -745,11 +736,11 @@ const GridTerminal = ({ tileId, cwd, cols, rows, active, visible, k, elevated, r
   const onInput = (e: React.FormEvent<HTMLTextAreaElement>) => {
     const ws = wsRef.current;
     if (!ws) return;
-    
+
     // Check if browser native input composition is active (to ignore intermediate accent states)
     const nativeEvent = e.nativeEvent as InputEvent;
     if (nativeEvent.isComposing) return;
-    
+
     const target = e.target as HTMLTextAreaElement;
     const val = target.value;
     if (val) {
@@ -801,16 +792,21 @@ const GridTerminal = ({ tileId, cwd, cols, rows, active, visible, k, elevated, r
     onKeyDown(e as any);
   };
 
-  const dismissResume = () => {
-    if (resumeId) markResumeSkipped(tileId, resumeId);
+  const closeResume = () => {
     setResumeId(null);
     focusTerminal();
+  };
+
+  const dismissResume = () => {
+    const ws = wsRef.current;
+    if (ws) sendPtyDismissAgent(ws);
+    closeResume();
   };
 
   const startResume = () => {
     const ws = wsRef.current;
     if (ws) sendPtyInput(ws, ` claude --resume ${resumeId}\r`);
-    dismissResume();
+    closeResume();
   };
 
   return (
@@ -854,20 +850,22 @@ const GridTerminal = ({ tileId, cwd, cols, rows, active, visible, k, elevated, r
         onContextMenu={onContextMenu}
         className={styles.wasm}
       />
-      <div className={styles.agentScale} style={{ width: `calc(100% / ${k})`, height: `calc(100% / ${k})`, transform: `scale(${k})` }}>
-        {resumeId && (
-          <ResumePanel sessionId={resumeId} cwd={cwd} active={active} onResume={startResume} onSkip={dismissResume} />
-        )}
-        <AgentBar
-          tileId={tileId}
-          active={active}
-          send={sendData}
-          getLines={getLines}
-          getStructured={getStructured}
-          focusTerminal={focusTerminal}
-          onClaudeActive={onClaudeActive}
-        />
-      </div>
+      {!readOnly && (
+        <div className={styles.agentScale} style={{ width: `calc(100% / ${k})`, height: `calc(100% / ${k})`, transform: `scale(${k})` }}>
+          {resumeId && (
+            <ResumePanel sessionId={resumeId} cwd={cwd} active={active} onResume={startResume} onSkip={dismissResume} />
+          )}
+          <AgentBar
+            tileId={tileId}
+            active={active}
+            send={sendData}
+            getLines={getLines}
+            getStructured={getStructured}
+            focusTerminal={focusTerminal}
+            onClaudeActive={onClaudeActive}
+          />
+        </div>
+      )}
     </>
   );
 };

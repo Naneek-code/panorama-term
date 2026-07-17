@@ -222,6 +222,61 @@
   color: var(--accent, var(--text-1));
 }
 
+.actionDivider {
+  flex: none;
+  width: 1px;
+  height: 12px;
+  margin: 0 3px;
+  background: var(--border-2);
+}
+
+.runDot {
+  width: 8px;
+  height: 8px;
+  margin: 2px;
+  border-radius: 50%;
+  background: #4cc38a;
+}
+
+.runDotErr {
+  background: #e5534b;
+}
+
+.stopIcon {
+  color: #e5534b;
+}
+
+.buildOk {
+  color: #4cc38a;
+}
+
+.buildFail {
+  color: #e5534b;
+}
+
+.runBtn svg,
+.runBtn .runDot {
+  transition: transform 80ms ease;
+}
+
+.runBtn:active svg,
+.runBtn:active .runDot {
+  transform: scale(0.75);
+}
+
+.runState {
+  flex: none;
+  margin-right: 6px;
+  font-family: 'Hack', monospace;
+  font-size: 10px;
+  font-weight: 600;
+  color: #4cc38a;
+}
+
+.runStateErr {
+  color: #e5534b;
+}
+
 .linked {
   cursor: grab;
 }

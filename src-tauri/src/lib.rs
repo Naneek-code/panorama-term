@@ -344,6 +344,67 @@ fn read_dir(path: String) -> Result<Vec<DirEntry>, String> {
     Ok(out)
 }
 
+fn run_watchers() -> &'static std::sync::Mutex<std::collections::HashMap<u32, notify::RecommendedWatcher>> {
+    static W: std::sync::OnceLock<std::sync::Mutex<std::collections::HashMap<u32, notify::RecommendedWatcher>>> =
+        std::sync::OnceLock::new();
+    W.get_or_init(|| std::sync::Mutex::new(std::collections::HashMap::new()))
+}
+
+static NEXT_RUN_WATCH: std::sync::atomic::AtomicU32 = std::sync::atomic::AtomicU32::new(1);
+
+#[tauri::command]
+fn run_watch_manifests(app: tauri::AppHandle, path: String) -> Result<u32, String> {
+    use notify::Watcher;
+    use tauri::Emitter;
+    let dir = PathBuf::from(&path);
+    let root = path.clone();
+    let mut watcher = notify::recommended_watcher(move |res: Result<notify::Event, notify::Error>| {
+        let Ok(event) = res else { return };
+        if event.kind.is_access() {
+            return;
+        }
+        let relevant = event.paths.iter().any(|p| {
+            p.file_name()
+                .is_some_and(|n| n == "package.json" || n == "Cargo.toml")
+        });
+        if relevant {
+            let _ = app.emit("run:manifests", serde_json::json!({ "path": root }));
+        }
+    })
+    .map_err(|e| e.to_string())?;
+    watcher
+        .watch(&dir, notify::RecursiveMode::NonRecursive)
+        .map_err(|e| e.to_string())?;
+    let id = NEXT_RUN_WATCH.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+    run_watchers().lock().unwrap().insert(id, watcher);
+    Ok(id)
+}
+
+#[tauri::command]
+fn run_unwatch_manifests(id: u32) {
+    run_watchers().lock().unwrap().remove(&id);
+}
+
+#[tauri::command]
+fn run_commands(path: String) -> Vec<String> {
+    let dir = std::path::Path::new(&path);
+    let mut out = Vec::new();
+    if let Ok(raw) = std::fs::read_to_string(dir.join("package.json")) {
+        if let Ok(v) = serde_json::from_str::<serde_json::Value>(&raw) {
+            if let Some(scripts) = v.get("scripts").and_then(|s| s.as_object()) {
+                for name in scripts.keys() {
+                    out.push(format!("bun run {name}"));
+                }
+            }
+        }
+    }
+    if dir.join("Cargo.toml").exists() {
+        out.push("cargo run".into());
+        out.push("cargo build".into());
+    }
+    out
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     let mut builder = tauri::Builder::default()
@@ -392,6 +453,9 @@ pub fn run() {
             set_pending_count,
             reveal_path,
             read_dir,
+            run_commands,
+            run_watch_manifests,
+            run_unwatch_manifests,
             open_url,
             store::store_read,
             store::store_write,

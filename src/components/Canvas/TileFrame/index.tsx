@@ -1,6 +1,6 @@
 import React from 'react';
 import type { EditorView } from '@codemirror/view';
-import { X, Pin, Link2, PinOff, Copy, Focus, Pencil, Trash2, ArrowUp, Maximize, Minimize, RotateCw, CopyPlus, ArrowDown, Link2Off, GitBranch, ShieldCheck, ChevronDown, FolderOpen, ClipboardCopy, ClipboardPaste, ArrowLeftRight } from 'lucide-react';
+import { X, Pin, Play, Minus, Check, Square, Link2, PinOff, Copy, Focus, Pencil, Hammer, Trash2, ArrowUp, Maximize, Minimize, RotateCw, CopyPlus, ArrowDown, Link2Off, GitBranch, ShieldCheck, SquareTerminal, ChevronDown, FolderOpen, ClipboardCopy, ClipboardPaste, ArrowLeftRight } from 'lucide-react';
 
 import type { Tile, View } from '~/domain/interfaces/canvas.interface';
 import type { TabMeta } from '~/domain/interfaces/workspace.interface';
@@ -14,7 +14,10 @@ import ClaudeLogo from '~/components/commons/ClaudeLogo';
 import ContextMenu from '~/components/commons/ContextMenu';
 import BranchMenu from '~/components/Canvas/TileFrame/BranchMenu';
 import GridTerminal from '~/components/Terminal/GridTerminal';
+import { useRun } from '~/usecase/hooks/useRun';
+import { stopRun } from '~/adapter/run/run.client';
 import { useBranches } from '~/usecase/hooks/useBranches';
+import { notifyClaude } from '~/components/commons/Notifications/bridge';
 import { useAheadBehind } from '~/usecase/hooks/useAheadBehind';
 import { stripSpinner, stripStarPrefix, hasSpinnerPrefix } from '~/usecase/util/title';
 import { TILE_GAP, TILE_HEADER } from '~/usecase/util/constants';
@@ -58,6 +61,7 @@ interface TileFrameProps {
   onDuplicate: (id: string) => void;
   onTogglePin: (id: string) => void;
   onToggleSelect: (id: string) => void;
+  onOpenRunOutput: (srcId: string, cwd: string, sessionId: string, cmd: string) => void;
   wsId: string | null;
   linkActive: boolean;
   linkTarget: { id: string; name: string } | null;
@@ -81,7 +85,7 @@ const devicePx = (v: number): number => {
   return Math.round(v * dpr) / dpr;
 };
 
-const TileFrame = ({ tile, view, active, selected, alert, visible, live, hidden, fullscreen, exiting, vpW, vpH, onMove, onSnap, onClose, onResize, onActivate, onFocusTile, onToggleFullscreen, onCwd, onAgentState, onOscTitle, onNoteChange, onNoteEditor, onNoteTitle, onCopyNote, onCopyNoteSelection, onPasteNote, onToggleRaw, onRename, onCopyPath, onReveal, onDuplicate, onTogglePin, onToggleSelect, wsId, linkActive, linkTarget, linkedTerms, onLink, onUnlink, onLinkDragStart, tabs, activeTabId, onMoveToTab }: TileFrameProps) => {
+const TileFrame = ({ tile, view, active, selected, alert, visible, live, hidden, fullscreen, exiting, vpW, vpH, onMove, onSnap, onClose, onResize, onActivate, onFocusTile, onToggleFullscreen, onCwd, onAgentState, onOscTitle, onNoteChange, onNoteEditor, onNoteTitle, onCopyNote, onCopyNoteSelection, onPasteNote, onToggleRaw, onRename, onCopyPath, onReveal, onDuplicate, onTogglePin, onToggleSelect, onOpenRunOutput, wsId, linkActive, linkTarget, linkedTerms, onLink, onUnlink, onLinkDragStart, tabs, activeTabId, onMoveToTab }: TileFrameProps) => {
   const k = view.k;
   const drag = React.useRef<{ sx: number; sy: number; ox: number; oy: number; pid: number; on: boolean } | null>(null);
   const resize = React.useRef<{ x: number; y: number; dir: string } | null>(null);
@@ -106,6 +110,8 @@ const TileFrame = ({ tile, view, active, selected, alert, visible, live, hidden,
     }
     if (!selected) onActivate(tile.id);
     if (tile.pinned) return;
+    if ((e.target as Element).closest('button, input')) return;
+    (e.currentTarget as Element).setPointerCapture(e.pointerId);
     drag.current = { sx: e.clientX, sy: e.clientY, ox: tile.x, oy: tile.y, pid: e.pointerId, on: false };
   };
   const onDrag = (e: React.PointerEvent) => {
@@ -114,7 +120,6 @@ const TileFrame = ({ tile, view, active, selected, alert, visible, live, hidden,
     if (!d.on) {
       if (Math.abs(e.clientX - d.sx) < DRAG_THRESHOLD && Math.abs(e.clientY - d.sy) < DRAG_THRESHOLD) return;
       d.on = true;
-      (e.target as Element).setPointerCapture(d.pid);
     }
     onMove(tile.id, d.ox + (e.clientX - d.sx) / k, d.oy + (e.clientY - d.sy) / k);
   };
@@ -157,15 +162,127 @@ const TileFrame = ({ tile, view, active, selected, alert, visible, live, hidden,
   const toggleFullscreen = () => onToggleFullscreen(tile.id);
   const oscTitle = tile.oscTitle ? stripStarPrefix(tile.oscTitle).trim() : '';
   const spinning = !tile.userTitle && claudeBusy && hasSpinnerPrefix(oscTitle);
-  const label = tile.userTitle
-    || (claudeLive && oscTitle && (spinning ? oscTitle : stripSpinner(oscTitle)))
-    || tile.cwd
-    || tile.autoTitle
-    || `${tile.type} · ${tile.id}`;
+  const label = tile.runCwd
+    ? tile.userTitle || tile.autoTitle || 'run'
+    : tile.userTitle
+      || (claudeLive && oscTitle && (spinning ? oscTitle : stripSpinner(oscTitle)))
+      || tile.cwd
+      || tile.autoTitle
+      || `${tile.type} · ${tile.id}`;
   const folder = tile.cwd && label !== tile.cwd ? tile.cwd.replace(/[\\/]+$/, '').split(/[\\/]/).pop() : '';
 
   const note = tile.type === 'note';
   const code = tile.type === 'code';
+  const runView = Boolean(tile.runCwd);
+  const runCwd = tile.type === 'term' ? tile.runCwd ?? tile.cwd : undefined;
+  const runTile = tile.type === 'term' ? (runView ? tile.ptySessionId?.replace(/^run:/, '') : tile.id) : undefined;
+  const run = useRun(runCwd, runTile);
+  const build = useRun(runView ? undefined : runCwd, runView ? undefined : tile.id, 'build');
+  const running = run.status.state === 'running';
+  const runFailed = run.status.state === 'exited' && (run.status.exitCode ?? 0) !== 0;
+  const building = build.status.state === 'running';
+  const buildOk = build.status.state === 'exited' && (build.status.exitCode ?? 0) === 0;
+  const buildFailed = build.status.state === 'exited' && (build.status.exitCode ?? 0) !== 0;
+  const showRunBtn = tile.type === 'term' && !runView && Boolean(tile.cwd) && (run.commands.length > 0 || run.status.state !== 'none');
+  const showBuildBtn = tile.type === 'term' && !runView && Boolean(tile.cwd) && (build.commands.length > 0 || build.status.state !== 'none');
+  const [runMenu, setRunMenu] = React.useState<{ x: number; y: number } | null>(null);
+  const [buildMenu, setBuildMenu] = React.useState<{ x: number; y: number } | null>(null);
+  const [killMenu, setKillMenu] = React.useState<{ x: number; y: number } | null>(null);
+  const closeRunMenu = () => setRunMenu(null);
+  const closeBuildMenu = () => setBuildMenu(null);
+  const closeKillMenu = () => setKillMenu(null);
+
+  React.useEffect(() => {
+    if (!run.crashed) return;
+    run.clearCrashed();
+    if (!runView) notifyClaude(tile.id, 'generic', `${run.crashed.cmd ?? 'run'} exited with code ${run.crashed.exitCode ?? '?'}`, 'Run crashed');
+  }, [run, runView, tile.id]);
+
+  React.useEffect(() => {
+    if (!build.crashed) return;
+    build.clearCrashed();
+    notifyClaude(tile.id, 'generic', `${build.crashed.cmd ?? 'build'} exited with code ${build.crashed.exitCode ?? '?'}`, 'Build failed');
+  }, [build, tile.id]);
+
+  const buildStop = build.stop;
+  React.useEffect(() => {
+    if (!buildOk) return;
+    const t = setTimeout(() => buildStop(), 3000);
+    return () => clearTimeout(t);
+  }, [buildOk, buildStop]);
+
+  const menuAtButton = (e: React.MouseEvent): { x: number; y: number } => {
+    const r = (e.currentTarget as HTMLElement).getBoundingClientRect();
+    return { x: r.left, y: r.bottom + 4 };
+  };
+
+  const openRunOutput = () => {
+    const sid = run.status.sessionId;
+    if (sid && tile.cwd) onOpenRunOutput(tile.id, tile.cwd, sid, run.status.cmd ?? run.defaultCmd ?? 'run');
+  };
+
+  const onRunClick = (e: React.MouseEvent) => {
+    e.stopPropagation();
+    if (running) run.stop();
+    else if (run.status.state === 'exited') run.start(run.status.cmd);
+    else run.start();
+  };
+
+  const onRunCaret = (e: React.MouseEvent) => {
+    e.stopPropagation();
+    setRunMenu(menuAtButton(e));
+  };
+
+  const onBuildClick = (e: React.MouseEvent) => {
+    e.stopPropagation();
+    if (building) build.stop(true);
+    else build.start();
+  };
+
+  const onBuildCaret = (e: React.MouseEvent) => {
+    e.stopPropagation();
+    setBuildMenu(menuAtButton(e));
+  };
+
+  const buildMenuItems: ContextMenuEntry[] = building
+    ? [{ label: 'Stop build', icon: <X size={15} strokeWidth={1.75} />, danger: true, onSelect: () => build.stop(true) }]
+    : build.commands.map((cmd) => ({
+        label: cmd === build.defaultCmd ? `${cmd}  (default)` : cmd,
+        icon: <Hammer size={15} strokeWidth={1.75} />,
+        onSelect: () => build.start(cmd)
+      }));
+
+  const onRunViewClose = (e: React.MouseEvent) => {
+    e.stopPropagation();
+    if (running) setKillMenu(menuAtButton(e));
+    else onClose(tile.id);
+  };
+
+  const killRun = () => {
+    if (runTile) void stopRun(runTile, true);
+    onClose(tile.id);
+  };
+
+  const runMenuItems: ContextMenuEntry[] =
+    run.status.state === 'none'
+      ? run.commands.map((cmd) => ({
+          label: cmd === run.defaultCmd ? `${cmd}  (default)` : cmd,
+          icon: <Play size={15} strokeWidth={1.75} />,
+          onSelect: () => run.start(cmd)
+        }))
+      : running
+        ? [
+            { label: 'Open output', icon: <SquareTerminal size={15} strokeWidth={1.75} />, onSelect: openRunOutput },
+            { label: 'Restart', icon: <RotateCw size={15} strokeWidth={1.75} />, onSelect: run.restart },
+            'separator',
+            { label: 'Stop', icon: <X size={15} strokeWidth={1.75} />, danger: true, onSelect: () => run.stop() }
+          ]
+        : [
+            { label: 'Open output', icon: <SquareTerminal size={15} strokeWidth={1.75} />, onSelect: openRunOutput },
+            { label: 'Run again', icon: <Play size={15} strokeWidth={1.75} />, onSelect: () => run.start(run.status.cmd) },
+            'separator',
+            { label: 'Dismiss', icon: <Trash2 size={15} strokeWidth={1.75} />, onSelect: () => run.stop() }
+          ];
   const tint = note ? noteTheme(tile.color) : null;
   const noteTint = tint ? { background: tint.body, color: tint.text } : null;
   const noteTitle = note ? parseFrontTitle(tile.content) : '';
@@ -305,6 +422,14 @@ const TileFrame = ({ tile, view, active, selected, alert, visible, live, hidden,
     closeItem
   ];
 
+  const runViewMenuItems: ContextMenuEntry[] = [
+    { label: 'Hide output', icon: <Minus size={15} strokeWidth={1.75} />, onSelect: closeTile },
+    { label: 'Restart', icon: <RotateCw size={15} strokeWidth={1.75} />, onSelect: run.restart },
+    { label: 'Focus', icon: <Focus size={15} strokeWidth={1.75} />, onSelect: focusTile },
+    'separator',
+    { label: 'Stop and close', icon: <X size={15} strokeWidth={1.75} />, danger: true, onSelect: killRun }
+  ];
+
   const otherTabs = tabs.filter((t) => t.id !== activeTabId);
   if (otherTabs.length > 0) {
     const moveItem: ContextMenuEntry = {
@@ -323,6 +448,8 @@ const TileFrame = ({ tile, view, active, selected, alert, visible, live, hidden,
 
   const menuItems: ContextMenuEntry[] = note
     ? noteMenuItems
+    : runView
+    ? runViewMenuItems
     : [
         { label: 'Rename', icon: <Pencil size={15} strokeWidth={1.75} />, onSelect: startRename },
         { label: 'Duplicate', icon: <CopyPlus size={15} strokeWidth={1.75} />, onSelect: duplicate },
@@ -440,10 +567,69 @@ const TileFrame = ({ tile, view, active, selected, alert, visible, live, hidden,
             </span>
           )}
           <div className={styles.actions}>
-            {!note && diff && (
+            {!note && !runView && diff && (
               <span className={styles.diffStat}>
                 <span className={styles.diffAdd}>+{diff.a}</span>
                 <span className={styles.diffDel}>-{diff.r}</span>
+              </span>
+            )}
+            {showBuildBtn && !fullscreen && (
+              <>
+                <span className={styles.actionDivider} />
+                <button
+                  className={`${styles.action} ${styles.runBtn}`}
+                  onClick={onBuildClick}
+                  onPointerDown={stopDrag}
+                  aria-label="Build project"
+                  data-tooltip={building ? `building: ${build.status.cmd}` : buildFailed ? `build failed (${build.status.exitCode})` : buildOk ? 'build ok' : build.defaultCmd ?? 'Build'}
+                >
+                  {building ? (
+                    <Square size={13} strokeWidth={2} className={styles.stopIcon} />
+                  ) : buildFailed ? (
+                    <X size={14} strokeWidth={2.5} className={styles.buildFail} />
+                  ) : buildOk ? (
+                    <Check size={14} strokeWidth={2.5} className={styles.buildOk} />
+                  ) : (
+                    <Hammer size={13} strokeWidth={2} />
+                  )}
+                </button>
+                {(building || build.commands.length > 1) && (
+                  <button className={styles.action} onClick={onBuildCaret} onPointerDown={stopDrag} aria-label="Build menu">
+                    <ChevronDown size={11} strokeWidth={2} />
+                  </button>
+                )}
+                {!showRunBtn && <span className={styles.actionDivider} />}
+              </>
+            )}
+            {showRunBtn && !fullscreen && (
+              <>
+                {!showBuildBtn && <span className={styles.actionDivider} />}
+                <button
+                  className={`${styles.action} ${styles.runBtn}`}
+                  onClick={onRunClick}
+                  onPointerDown={stopDrag}
+                  aria-label="Run project"
+                  data-tooltip={running ? run.status.cmd : runFailed ? `exited (${run.status.exitCode})` : run.defaultCmd ?? 'Run'}
+                >
+                  {running ? (
+                    <Square size={13} strokeWidth={2} className={styles.stopIcon} />
+                  ) : runFailed ? (
+                    <span className={`${styles.runDot} ${styles.runDotErr}`} />
+                  ) : (
+                    <Play size={13} strokeWidth={2} />
+                  )}
+                </button>
+                {(run.status.state !== 'none' || run.commands.length > 1) && (
+                  <button className={styles.action} onClick={onRunCaret} onPointerDown={stopDrag} aria-label="Run menu">
+                    <ChevronDown size={11} strokeWidth={2} />
+                  </button>
+                )}
+                <span className={styles.actionDivider} />
+              </>
+            )}
+            {runView && (
+              <span className={running ? styles.runState : `${styles.runState} ${styles.runStateErr}`}>
+                {running ? 'running' : run.status.state === 'exited' ? `exit ${run.status.exitCode ?? '?'}` : ''}
               </span>
             )}
             {note && (
@@ -474,16 +660,7 @@ const TileFrame = ({ tile, view, active, selected, alert, visible, live, hidden,
                 <Copy size={13} strokeWidth={2} />
               </button>
             )}
-            {!note && !fullscreen && (
-              <button
-                className={tile.pinned ? `${styles.action} ${styles.pinned}` : styles.action}
-                onClick={togglePin}
-                aria-label={tile.pinned ? 'Unpin tile' : 'Pin tile'}
-              >
-                {tile.pinned ? <PinOff size={13} strokeWidth={2} /> : <Pin size={13} strokeWidth={2} />}
-              </button>
-            )}
-            {!note && !fullscreen && (
+            {!note && !runView && !fullscreen && (
               <button
                 className={linkedTerms.length ? `${styles.action} ${styles.linked}` : styles.action}
                 onPointerDown={startLinkDrag}
@@ -495,17 +672,33 @@ const TileFrame = ({ tile, view, active, selected, alert, visible, live, hidden,
                 </span>
               </button>
             )}
-            {!note && (
+            {!note && !runView && (
               <button className={styles.action} onClick={toggleFullscreen} aria-label="Toggle fullscreen">
                 {fullscreen ? <Minimize size={13} strokeWidth={2} /> : <Maximize size={13} strokeWidth={2} />}
               </button>
             )}
-            {!note && !code && (
+            {!note && !code && !runView && (
               <button className={styles.action} onClick={restartTile} aria-label="Restart terminal">
                 <RotateCw size={13} strokeWidth={2} />
               </button>
             )}
-            {!fullscreen && (
+            {runView && (
+              <button className={styles.action} onClick={closeTile} onPointerDown={stopDrag} aria-label="Hide output" data-tooltip="Hide (keeps running)">
+                <Minus size={14} strokeWidth={2} />
+              </button>
+            )}
+            {runView && (
+              <button
+                className={`${styles.action} ${styles.close}`}
+                onClick={onRunViewClose}
+                onPointerDown={stopDrag}
+                aria-label="Stop and close"
+                data-tooltip={running ? 'Stop process' : 'Close'}
+              >
+                <X size={14} strokeWidth={2} />
+              </button>
+            )}
+            {!runView && !fullscreen && (
               <button className={`${styles.action} ${styles.close}`} onClick={closeTile} aria-label="Close tile">
                 <X size={14} strokeWidth={2} />
               </button>
@@ -535,7 +728,9 @@ const TileFrame = ({ tile, view, active, selected, alert, visible, live, hidden,
         >
           <GridTerminal
             k={ek}
-            cwd={tile.cwd}
+            sessionId={tile.ptySessionId}
+            readOnly={runView}
+            cwd={runView ? tile.runCwd : tile.cwd}
             onCwd={onCwd}
             onOscTitle={onOscTitle}
             onClaudeActive={setClaudeLive}
@@ -569,6 +764,19 @@ const TileFrame = ({ tile, view, active, selected, alert, visible, live, hidden,
         </div>
       )}
       {menu && <ContextMenu x={menu.x} y={menu.y} items={menuItems} onClose={closeMenu} />}
+      {runMenu && <ContextMenu x={runMenu.x} y={runMenu.y} items={runMenuItems} onClose={closeRunMenu} />}
+      {buildMenu && <ContextMenu x={buildMenu.x} y={buildMenu.y} items={buildMenuItems} onClose={closeBuildMenu} />}
+      {killMenu && (
+        <ContextMenu
+          x={killMenu.x}
+          y={killMenu.y}
+          items={[
+            { label: `Kill ${run.status.cmd ?? 'process'}`, icon: <X size={15} strokeWidth={1.75} />, danger: true, onSelect: killRun },
+            { label: 'Cancel', onSelect: closeKillMenu }
+          ]}
+          onClose={closeKillMenu}
+        />
+      )}
       {branchLocal && tile.cwd && (
         <BranchMenu
           k={ek}

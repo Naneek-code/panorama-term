@@ -65,6 +65,7 @@ const Canvas = () => {
     noteRenderDefault,
     addTile,
     addCode,
+    addRunView,
     patchTile,
     addFrame,
     gridRef,
@@ -157,7 +158,7 @@ const Canvas = () => {
       const wx = (e.clientX - v.x) / v.k;
       const wy = (e.clientY - v.y) / v.k;
       const term = tilesR.current.find(
-        (t) => t.type === 'term' && t.id !== dragId && wx >= t.x && wx <= t.x + t.width && wy >= t.y && wy <= t.y + t.height
+        (t) => t.type === 'term' && t.id !== dragId && !t.runCwd && wx >= t.x && wx <= t.x + t.width && wy >= t.y && wy <= t.y + t.height
       );
       setLinkDrag((d) => (d ? { ...d, x: e.clientX, y: e.clientY, over: term?.id ?? null } : d));
     };
@@ -609,7 +610,7 @@ const Canvas = () => {
           const linkedIds =
             t.type === 'note'
               ? t.linkedTo ?? []
-              : t.type === 'term'
+              : t.type === 'term' && !t.runCwd
                 ? [...new Set([...(t.linkedTo ?? []), ...tiles.filter((x) => x.type === 'term' && (x.linkedTo ?? []).includes(t.id)).map((x) => x.id)])]
                 : [];
           const linkActive = t.type === 'note' && linkedIds.some((id) => id === activeTile || selected.has(id));
@@ -654,6 +655,7 @@ const Canvas = () => {
               onDuplicate={duplicateTile}
               onTogglePin={togglePin}
               onToggleSelect={toggleSelect}
+              onOpenRunOutput={addRunView}
               onMoveToTab={moveTileToTabWrapper}
               tabs={tabs}
               activeTabId={activeTabId}

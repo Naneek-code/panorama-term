@@ -35,7 +35,7 @@ export const toRuntime = (state: CanvasState): RuntimeCanvas => ({
 
 export const toStored = (canvas: RuntimeCanvas): CanvasState => ({
   version: 1,
-  tiles: canvas.tiles,
+  tiles: canvas.tiles.filter((t) => !t.runCwd),
   frames: canvas.frames,
   viewport: viewportFromView(canvas.view)
 });

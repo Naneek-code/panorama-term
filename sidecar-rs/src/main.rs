@@ -334,6 +334,237 @@ fn parse_osc7(url: &[u8]) -> Option<String> {
 
 const SCROLLBACK_LINES: usize = 5000;
 const RAW_CAP: usize = 256 * 1024;
+const RUN_LINE_CAP: usize = 10_000;
+const RUN_REQ_MAX: usize = 500;
+
+#[derive(Clone, Copy, PartialEq)]
+enum EscState {
+    Ground,
+    Esc,
+    EscInter,
+    Csi,
+    Osc,
+    OscEsc,
+}
+
+struct RunLog {
+    buf: std::collections::VecDeque<String>,
+    total: usize,
+    partial: String,
+    esc: EscState,
+    cr: bool,
+}
+
+impl RunLog {
+    fn new() -> Self {
+        RunLog {
+            buf: std::collections::VecDeque::new(),
+            total: 0,
+            partial: String::new(),
+            esc: EscState::Ground,
+            cr: false,
+        }
+    }
+
+    fn push_line(&mut self) {
+        self.total += 1;
+        self.buf.push_back(std::mem::take(&mut self.partial));
+        if self.buf.len() > RUN_LINE_CAP {
+            self.buf.pop_front();
+        }
+    }
+
+    fn feed(&mut self, text: &str) {
+        for c in text.chars() {
+            match self.esc {
+                EscState::Ground => {
+                    if self.cr && c != '\n' {
+                        self.cr = false;
+                        self.partial.clear();
+                    }
+                    match c {
+                        '\x1b' => self.esc = EscState::Esc,
+                        '\n' => {
+                            self.cr = false;
+                            self.push_line();
+                        }
+                        '\r' => self.cr = true,
+                        '\t' => self.partial.push('\t'),
+                        c if (c as u32) >= 0x20 => self.partial.push(c),
+                        _ => {}
+                    }
+                }
+                EscState::Esc => {
+                    self.esc = match c {
+                        '[' => EscState::Csi,
+                        ']' => EscState::Osc,
+                        '(' | ')' | '#' | '%' => EscState::EscInter,
+                        _ => EscState::Ground,
+                    }
+                }
+                EscState::EscInter => self.esc = EscState::Ground,
+                EscState::Csi => {
+                    if ('\u{40}'..='\u{7e}').contains(&c) {
+                        self.esc = EscState::Ground;
+                    }
+                }
+                EscState::Osc => match c {
+                    '\x07' => self.esc = EscState::Ground,
+                    '\x1b' => self.esc = EscState::OscEsc,
+                    _ => {}
+                },
+                EscState::OscEsc => {
+                    self.esc = if c == '\\' { EscState::Ground } else { EscState::Osc };
+                }
+            }
+        }
+    }
+
+    fn range(&self) -> (usize, usize) {
+        let first = self.total.saturating_sub(self.buf.len()) + 1;
+        (first, self.total)
+    }
+}
+
+struct RunState {
+    cmd: String,
+    cwd: String,
+    kind: String,
+    started: Instant,
+    log: Mutex<RunLog>,
+    exit: Mutex<Option<u32>>,
+}
+
+fn expand_win_env(s: &str) -> String {
+    let mut out = String::with_capacity(s.len());
+    let mut rest = s;
+    while let Some(i) = rest.find('%') {
+        out.push_str(&rest[..i]);
+        let after = &rest[i + 1..];
+        match after.find('%') {
+            Some(j) => {
+                let name = &after[..j];
+                match std::env::var(name) {
+                    Ok(v) => out.push_str(&v),
+                    Err(_) => {
+                        out.push('%');
+                        out.push_str(name);
+                        out.push('%');
+                    }
+                }
+                rest = &after[j + 1..];
+            }
+            None => {
+                out.push('%');
+                rest = after;
+            }
+        }
+    }
+    out.push_str(rest);
+    out
+}
+
+#[cfg(windows)]
+fn reg_path_value(key: &str) -> Option<String> {
+    let out = hidden_command("reg.exe")
+        .args(["query", key, "/v", "Path"])
+        .output()
+        .ok()?;
+    if !out.status.success() {
+        return None;
+    }
+    let text = String::from_utf8_lossy(&out.stdout);
+    for line in text.lines() {
+        let idx = line
+            .find("REG_EXPAND_SZ")
+            .map(|i| i + "REG_EXPAND_SZ".len())
+            .or_else(|| line.find("REG_SZ").map(|i| i + "REG_SZ".len()));
+        if let Some(idx) = idx {
+            let v = line[idx..].trim();
+            if !v.is_empty() {
+                return Some(v.to_string());
+            }
+        }
+    }
+    None
+}
+
+#[cfg(windows)]
+fn fresh_path() -> Option<String> {
+    let machine = reg_path_value(r"HKLM\SYSTEM\CurrentControlSet\Control\Session Manager\Environment");
+    let user = reg_path_value(r"HKCU\Environment");
+    let current = std::env::var("PATH").ok();
+    let mut parts: Vec<String> = Vec::new();
+    for chunk in [machine, user, current].into_iter().flatten() {
+        for seg in expand_win_env(&chunk).split(';') {
+            let seg = seg.trim();
+            if !seg.is_empty() && !parts.iter().any(|e| e.eq_ignore_ascii_case(seg)) {
+                parts.push(seg.to_string());
+            }
+        }
+    }
+    if parts.is_empty() {
+        None
+    } else {
+        Some(parts.join(";"))
+    }
+}
+
+#[cfg(not(windows))]
+fn fresh_path() -> Option<String> {
+    None
+}
+
+fn norm_cwd(cwd: &str) -> String {
+    let mut norm = cwd.replace('/', if cfg!(windows) { "\\" } else { "/" });
+    while norm.len() > 1 && (norm.ends_with('\\') || norm.ends_with('/')) {
+        norm.pop();
+    }
+    if cfg!(windows) {
+        norm = norm.to_lowercase();
+    }
+    norm
+}
+
+fn run_key(kind: &str, tile: &str) -> String {
+    format!("{}:{}", kind, sanitize_key(tile))
+}
+
+fn run_lookup_tile(kind: &str, tile: &str) -> Option<Arc<Session>> {
+    sessions().lock().unwrap().get(&run_key(kind, tile)).cloned()
+}
+
+fn run_lookup_cwd(cwd: &str) -> Option<Arc<Session>> {
+    let norm = norm_cwd(cwd);
+    let list: Vec<Arc<Session>> = sessions().lock().unwrap().values().cloned().collect();
+    let mut best: Option<Arc<Session>> = None;
+    for s in list {
+        let Some(run) = &s.run else { continue };
+        if run.kind != "run" || run.cwd != norm {
+            continue;
+        }
+        let better = match &best {
+            None => true,
+            Some(b) => {
+                let b_run = b.run.as_ref().unwrap();
+                let s_live = !s.exited.load(Ordering::Relaxed);
+                let b_live = !b.exited.load(Ordering::Relaxed);
+                (s_live && !b_live) || (s_live == b_live && run.started > b_run.started)
+            }
+        };
+        if better {
+            best = Some(s);
+        }
+    }
+    best
+}
+
+fn run_lookup(kind: &str, tile: Option<&str>, cwd: Option<&str>) -> Option<Arc<Session>> {
+    match tile {
+        Some(t) if !t.is_empty() => run_lookup_tile(kind, t),
+        _ => cwd.filter(|c| !c.is_empty()).and_then(run_lookup_cwd),
+    }
+}
 
 struct Session {
     tile_id: String,
@@ -361,6 +592,7 @@ struct Session {
     events: Mutex<Vec<String>>,
     focused: Arc<AtomicBool>,
     focus_reporting: Arc<AtomicBool>,
+    run: Option<RunState>,
 }
 
 fn buffer_path(tile_id: &str) -> Option<std::path::PathBuf> {
@@ -387,7 +619,7 @@ fn load_buffer(tile_id: &str) -> Vec<u8> {
 }
 
 fn flush_session(s: &Session) {
-    if !s.raw_dirty.swap(false, Ordering::Relaxed) {
+    if s.run.is_some() || !s.raw_dirty.swap(false, Ordering::Relaxed) {
         return;
     }
     let data = s.raw.lock().map(|r| r.clone()).unwrap_or_default();
@@ -450,6 +682,19 @@ fn read_binding(tile_id: &str) -> Option<String> {
 fn read_binding_rec(tile_id: &str) -> Option<serde_json::Value> {
     let raw = std::fs::read_to_string(binding_path(tile_id)?).ok()?;
     serde_json::from_str(&raw).ok()
+}
+
+fn clear_binding_session(tile_id: &str) {
+    let Some(path) = binding_path(tile_id) else {
+        return;
+    };
+    let Some(mut rec) = read_binding_rec(tile_id).filter(|v| v.is_object()) else {
+        return;
+    };
+    let obj = rec.as_object_mut().unwrap();
+    if obj.remove("agentSessionId").is_some() {
+        let _ = std::fs::write(path, rec.to_string());
+    }
 }
 
 fn claude_home() -> Option<PathBuf> {
@@ -1051,7 +1296,7 @@ fn emit_event(event: &str) {
     let seq = format!("\x1b]777;notify;{AGENT_EVENT_SENTINEL};{body}\x07");
     let mut out = serde_json::json!({ "terminalSequence": seq });
     if event == "prompt-submit" {
-        let parts: Vec<String> = [linked_notes_context(), linked_peers_context()]
+        let parts: Vec<String> = [linked_notes_context(), linked_peers_context(), run_context(&cwd)]
             .into_iter()
             .flatten()
             .collect();
@@ -1066,6 +1311,54 @@ fn emit_event(event: &str) {
         }
     }
     println!("{out}");
+}
+
+fn urlenc(s: &str) -> String {
+    let mut out = String::with_capacity(s.len());
+    for b in s.bytes() {
+        match b {
+            b'A'..=b'Z' | b'a'..=b'z' | b'0'..=b'9' | b'-' | b'_' | b'.' | b'~' => {
+                out.push(b as char)
+            }
+            _ => out.push_str(&format!("%{b:02X}")),
+        }
+    }
+    out
+}
+
+fn sidecar_get(path_query: &str) -> Option<String> {
+    use std::net::TcpStream as StdTcp;
+    let addr = format!("127.0.0.1:{}", port());
+    let stream = StdTcp::connect_timeout(&addr.parse().ok()?, Duration::from_millis(300)).ok()?;
+    stream.set_read_timeout(Some(Duration::from_millis(500))).ok()?;
+    stream.set_write_timeout(Some(Duration::from_millis(500))).ok()?;
+    let mut stream = stream;
+    let req = format!("GET {path_query} HTTP/1.1\r\nHost: 127.0.0.1\r\nConnection: close\r\n\r\n");
+    stream.write_all(req.as_bytes()).ok()?;
+    let mut raw = String::new();
+    stream.read_to_string(&mut raw).ok()?;
+    raw.split_once("\r\n\r\n").map(|(_, b)| b.to_string())
+}
+
+fn run_context(cwd: &str) -> Option<String> {
+    if cwd.is_empty() {
+        return None;
+    }
+    let body = sidecar_get(&format!("/run/status?cwd={}", urlenc(cwd)))?;
+    let v: serde_json::Value = serde_json::from_str(&body).ok()?;
+    let state = v.get("state").and_then(|s| s.as_str())?;
+    if state == "none" {
+        return None;
+    }
+    let cmd = v.get("cmd").and_then(|c| c.as_str()).unwrap_or("?");
+    let base = format!("http://127.0.0.1:{}", port());
+    let enc = urlenc(cwd);
+    Some(format!(
+        "This project has a dev run session (`{cmd}`, currently {state}). When the user asks about the running app, its output, or errors in it, inspect the logs yourself:\n\
+         - status: curl \"{base}/run/status?cwd={enc}\"\n\
+         - logs: curl \"{base}/run/logs?cwd={enc}&tail=50\"\n\
+         Logs are numbered lines; the first response line reports the served range and total (max 500 per request). Start with a small tail (30-50 lines) and paginate with &from=<line>&count=<n> only when needed. Remember the last line you read and fetch only newer lines on later checks. Never fetch the whole log."
+    ))
 }
 
 fn record_agent() {
@@ -1354,6 +1647,9 @@ struct Params {
     shell: Option<String>,
     target: Option<String>,
     elevated: bool,
+    spawn_cmd: Option<String>,
+    run_kind: String,
+    attach_only: bool,
 }
 
 fn default_shell() -> String {
@@ -1579,7 +1875,20 @@ fn spawn_session(
         })
         .map_err(|e| format!("openpty: {e}"))?;
 
-    let mut cmd = if p.elevated {
+    let mut cmd = if let Some(run_cmd) = &p.spawn_cmd {
+        if cfg!(windows) {
+            let mut c = CommandBuilder::new(resolve_powershell());
+            c.arg("-NoLogo");
+            c.arg("-Command");
+            c.arg(run_cmd);
+            c
+        } else {
+            let mut c = CommandBuilder::new("/bin/sh");
+            c.arg("-lc");
+            c.arg(run_cmd);
+            c
+        }
+    } else if p.elevated {
         if !command_exists("gsudo.exe") {
             return Err("gsudo not found - install it with: winget install gerardog.gsudo".into());
         }
@@ -1593,6 +1902,11 @@ fn spawn_session(
     cmd.env("TERM", "xterm-256color");
     cmd.env("PANORAMA_TERMINAL", "1");
     cmd.env("PANORAMA_TILE_ID", &p.tile_id);
+    if p.spawn_cmd.is_some() {
+        if let Some(path) = fresh_path() {
+            cmd.env("PATH", path);
+        }
+    }
 
     let child = pair
         .slave
@@ -1605,7 +1919,11 @@ fn spawn_session(
     let writer = pair.master.take_writer().map_err(|e| format!("writer: {e}"))?;
     drop(pair.slave);
 
-    let seed = load_buffer(&p.tile_id);
+    let seed = if p.spawn_cmd.is_some() {
+        Vec::new()
+    } else {
+        load_buffer(&p.tile_id)
+    };
     let focused = Arc::new(AtomicBool::new(true));
     let focus_reporting = Arc::new(AtomicBool::new(false));
     let sink = CwdSink {
@@ -1623,9 +1941,17 @@ fn spawn_session(
         let _ = parser.callbacks_mut().take_progress();
     }
 
+    let run = p.spawn_cmd.as_ref().map(|run_cmd| RunState {
+        cmd: run_cmd.clone(),
+        cwd: norm_cwd(&cwd),
+        kind: p.run_kind.clone(),
+        started: Instant::now(),
+        log: Mutex::new(RunLog::new()),
+        exit: Mutex::new(None),
+    });
     let session = Arc::new(Session {
         tile_id: p.tile_id.clone(),
-        shell: shell.clone(),
+        shell: p.spawn_cmd.clone().unwrap_or_else(|| shell.clone()),
         parser: Mutex::new(parser),
         writer: Mutex::new(writer),
         master: Mutex::new(pair.master),
@@ -1649,6 +1975,7 @@ fn spawn_session(
         events: Mutex::new(Vec::new()),
         focused,
         focus_reporting,
+        run,
     });
 
     let s = session.clone();
@@ -1745,6 +2072,11 @@ fn spawn_session(
                             let _ = w.flush();
                         }
                     }
+                    if let Some(run) = &s.run {
+                        if let Ok(text) = std::str::from_utf8(chunk) {
+                            run.log.lock().unwrap_or_else(|e| e.into_inner()).feed(text);
+                        }
+                    }
                     if let Ok(mut raw) = s.raw.lock() {
                         raw.extend_from_slice(chunk);
                         if raw.len() > RAW_CAP {
@@ -1759,11 +2091,38 @@ fn spawn_session(
         }
         s.exited.store(true, Ordering::Relaxed);
         s.dirty.store(true, Ordering::Relaxed);
-        flush_session(&s);
-        sessions().lock().unwrap().remove(&s.tile_id);
+        if s.run.is_none() {
+            flush_session(&s);
+            sessions().lock().unwrap().remove(&s.tile_id);
+        }
     });
 
-    inject_osc7(&session, &shell);
+    if session.run.is_some() {
+        let s = session.clone();
+        std::thread::spawn(move || loop {
+            std::thread::sleep(Duration::from_millis(500));
+            if s.exited.load(Ordering::Relaxed) {
+                return;
+            }
+            let done = {
+                let mut c = s.child.lock().unwrap_or_else(|e| e.into_inner());
+                c.try_wait().ok().flatten()
+            };
+            if let Some(st) = done {
+                if let Some(run) = &s.run {
+                    let mut exit = run.exit.lock().unwrap_or_else(|e| e.into_inner());
+                    if exit.is_none() {
+                        *exit = Some(st.exit_code());
+                    }
+                }
+                s.exited.store(true, Ordering::Relaxed);
+                s.dirty.store(true, Ordering::Relaxed);
+                return;
+            }
+        });
+    } else {
+        inject_osc7(&session, &shell);
+    }
     Ok(session)
 }
 
@@ -1785,6 +2144,12 @@ fn lookup_live(tile_id: &str) -> Option<Arc<Session>> {
 async fn get_or_create(p: &Params) -> Result<(Arc<Session>, bool), String> {
     if let Some(s) = lookup_live(&p.tile_id) {
         return Ok((s, true));
+    }
+    if p.attach_only {
+        if let Some(s) = sessions().lock().unwrap().get(&p.tile_id).cloned() {
+            return Ok((s, true));
+        }
+        return Err("session not running".into());
     }
     let permit = spawn_sem()
         .acquire_owned()
@@ -1975,6 +2340,89 @@ fn kill_session(s: &Arc<Session>) {
         flush_session(&s);
         sessions().lock().unwrap().remove(&s.tile_id);
     });
+}
+
+fn run_stop(s: &Arc<Session>) {
+    if let Ok(mut w) = s.writer.lock() {
+        let _ = w.write_all(b"\x03");
+        let _ = w.flush();
+    }
+    let s = s.clone();
+    std::thread::spawn(move || {
+        for _ in 0..30 {
+            if s.exited.load(Ordering::Relaxed) {
+                return;
+            }
+            std::thread::sleep(Duration::from_millis(100));
+        }
+        kill_session(&s);
+    });
+}
+
+fn run_status_json(target: Option<Arc<Session>>) -> String {
+    let Some(s) = target else {
+        return serde_json::json!({ "state": "none" }).to_string();
+    };
+    let Some(run) = &s.run else {
+        return serde_json::json!({ "state": "none" }).to_string();
+    };
+    let total = run.log.lock().unwrap_or_else(|e| e.into_inner()).total;
+    if s.exited.load(Ordering::Relaxed) {
+        let code = *run.exit.lock().unwrap_or_else(|e| e.into_inner());
+        serde_json::json!({
+            "state": "exited",
+            "exitCode": code,
+            "cmd": run.cmd,
+            "totalLines": total,
+            "sessionId": s.tile_id,
+        })
+        .to_string()
+    } else {
+        let pid = s.child.lock().ok().and_then(|c| c.process_id());
+        serde_json::json!({
+            "state": "running",
+            "cmd": run.cmd,
+            "pid": pid,
+            "totalLines": total,
+            "sessionId": s.tile_id,
+        })
+        .to_string()
+    }
+}
+
+fn run_logs_text(target: Option<Arc<Session>>, q: &HashMap<String, String>) -> String {
+    let Some(s) = target else {
+        return "# no run session".into();
+    };
+    let Some(run) = &s.run else {
+        return "# no run session".into();
+    };
+    let state = if s.exited.load(Ordering::Relaxed) { "exited" } else { "running" };
+    let log = run.log.lock().unwrap_or_else(|e| e.into_inner());
+    let (first, total) = log.range();
+    if total == 0 {
+        return format!("# lines 0-0 of 0 ({state})");
+    }
+    let count = q
+        .get("count")
+        .or_else(|| q.get("tail"))
+        .and_then(|v| v.parse::<usize>().ok())
+        .unwrap_or(50)
+        .clamp(1, RUN_REQ_MAX);
+    let from = match q.get("from").and_then(|v| v.parse::<usize>().ok()) {
+        Some(f) => f.max(first),
+        None => total.saturating_sub(count - 1).max(first),
+    };
+    let to = (from + count - 1).min(total);
+    if from > total {
+        return format!("# lines {total}-{total} of {total} ({state}) - from beyond end");
+    }
+    let mut out = format!("# lines {from}-{to} of {total} ({state})\n");
+    for n in from..=to {
+        out.push_str(&log.buf[n - first]);
+        out.push('\n');
+    }
+    out
 }
 
 fn build_frame(s: &Session) -> Vec<u8> {
@@ -2177,6 +2625,7 @@ fn handle_client_msg(s: &Arc<Session>, text: &str) {
                 s.dirty.store(true, Ordering::Relaxed);
             }
         }
+        Some("dismissAgent") => clear_binding_session(&s.tile_id),
         Some("kill") => kill_session(s),
         _ => {}
     }
@@ -2419,6 +2868,9 @@ async fn handle_conn(mut stream: TcpStream) {
             shell: q.get("shell").cloned(),
             target: q.get("target").cloned(),
             elevated: q.get("elevated").map(|v| v == "1").unwrap_or(false),
+            spawn_cmd: None,
+            run_kind: "run".into(),
+            attach_only: q.get("attach").map(|v| v == "1").unwrap_or(false),
         };
         let ws = WebSocketStream::from_raw_socket(stream, Role::Server, None).await;
         handle_ws(ws, params).await;
@@ -2521,6 +2973,114 @@ async fn handle_conn(mut stream: TcpStream) {
         return;
     }
 
+    if path_only == "/run/start" {
+        let q = parse_query(query);
+        let cwd = q.get("cwd").cloned().unwrap_or_default();
+        let cmd = q.get("cmd").cloned().unwrap_or_default();
+        let tile = q.get("tile").cloned().unwrap_or_default();
+        let kind = match q.get("kind").map(String::as_str) {
+            Some("build") => "build".to_string(),
+            _ => "run".to_string(),
+        };
+        let body = if cwd.is_empty() || cmd.is_empty() || tile.is_empty() {
+            serde_json::json!({ "error": "cwd, cmd and tile required" }).to_string()
+        } else {
+            let key = run_key(&kind, &tile);
+            let existing = run_lookup_tile(&kind, &tile);
+            match existing {
+                Some(s) if !s.exited.load(Ordering::Relaxed) => {
+                    serde_json::json!({ "error": "already running" }).to_string()
+                }
+                _ => {
+                    sessions().lock().unwrap().remove(&key);
+                    let params = Params {
+                        tile_id: key,
+                        cols: 120,
+                        rows: 30,
+                        cwd: Some(cwd.clone()),
+                        shell: None,
+                        target: None,
+                        elevated: false,
+                        spawn_cmd: Some(cmd),
+                        run_kind: kind.clone(),
+                        attach_only: false,
+                    };
+                    match get_or_create(&params).await {
+                        Ok(_) => run_status_json(run_lookup_tile(&kind, &tile)),
+                        Err(e) => serde_json::json!({ "error": e }).to_string(),
+                    }
+                }
+            }
+        };
+        let resp = format!(
+            "HTTP/1.1 200 OK\r\nAccess-Control-Allow-Origin: *\r\nContent-Type: application/json\r\nContent-Length: {}\r\n\r\n{}",
+            body.len(),
+            body
+        );
+        let _ = stream.write_all(resp.as_bytes()).await;
+        return;
+    }
+
+    if path_only == "/run/status" {
+        let q = parse_query(query);
+        let kind = q.get("kind").map(String::as_str).unwrap_or("run");
+        let body = run_status_json(run_lookup(
+            kind,
+            q.get("tile").map(String::as_str),
+            q.get("cwd").map(String::as_str),
+        ));
+        let resp = format!(
+            "HTTP/1.1 200 OK\r\nAccess-Control-Allow-Origin: *\r\nContent-Type: application/json\r\nContent-Length: {}\r\n\r\n{}",
+            body.len(),
+            body
+        );
+        let _ = stream.write_all(resp.as_bytes()).await;
+        return;
+    }
+
+    if path_only == "/run/logs" {
+        let q = parse_query(query);
+        let kind = q.get("kind").map(String::as_str).unwrap_or("run");
+        let body = run_logs_text(
+            run_lookup(kind, q.get("tile").map(String::as_str), q.get("cwd").map(String::as_str)),
+            &q,
+        );
+        let resp = format!(
+            "HTTP/1.1 200 OK\r\nAccess-Control-Allow-Origin: *\r\nContent-Type: text/plain; charset=utf-8\r\nContent-Length: {}\r\n\r\n{}",
+            body.len(),
+            body
+        );
+        let _ = stream.write_all(resp.as_bytes()).await;
+        return;
+    }
+
+    if path_only == "/run/stop" {
+        let q = parse_query(query);
+        let hard = q.get("hard").map(|v| v == "1").unwrap_or(false);
+        let kind = q.get("kind").map(String::as_str).unwrap_or("run");
+        if let Some(s) = run_lookup(
+            kind,
+            q.get("tile").map(String::as_str),
+            q.get("cwd").map(String::as_str),
+        ) {
+            if hard {
+                kill_session(&s);
+            } else if !s.exited.load(Ordering::Relaxed) {
+                run_stop(&s);
+            } else {
+                sessions().lock().unwrap().remove(&s.tile_id);
+            }
+        }
+        let body = "{\"ok\":true}";
+        let resp = format!(
+            "HTTP/1.1 200 OK\r\nAccess-Control-Allow-Origin: *\r\nContent-Type: application/json\r\nContent-Length: {}\r\n\r\n{}",
+            body.len(),
+            body
+        );
+        let _ = stream.write_all(resp.as_bytes()).await;
+        return;
+    }
+
     let body = if path_only == "/kill" {
         let q = parse_query(query);
         if let Some(tid) = q.get("tileId") {
@@ -2562,6 +3122,9 @@ async fn main() {
     if std::env::args().nth(1).as_deref() != Some(DAEMON_ARG) {
         daemonize();
     }
+    if let Some(path) = fresh_path() {
+        std::env::set_var("PATH", path);
+    }
     install_claude_hook();
     let listener = TcpListener::bind(("127.0.0.1", port()))
         .await
@@ -2594,9 +3157,23 @@ async fn main() {
 mod tests {
     use super::{
         agent_event_ws_msg, decode_osc52, default_status_line, diff_lines, sanitize_event_text,
-        status_ws_msg, utf8_valid_len, Arc, AtomicBool, CwdSink, Ordering,
+        status_ws_msg, utf8_valid_len, Arc, AtomicBool, CwdSink, Ordering, RunLog,
         OSC_BG_RESPONSE, OSC_FG_RESPONSE,
     };
+
+    #[test]
+    fn run_log_strips_ansi_and_paginates() {
+        let mut log = RunLog::new();
+        log.feed("\x1b[32mready\x1b[0m in 300ms\r\n");
+        log.feed("spinner frame\rLocal: http://localhost:5173/\r");
+        log.feed("\n\x1b]0;title\x07plain\npartial");
+        assert_eq!(log.total, 3);
+        assert_eq!(log.buf[0], "ready in 300ms");
+        assert_eq!(log.buf[1], "Local: http://localhost:5173/");
+        assert_eq!(log.buf[2], "plain");
+        assert_eq!(log.partial, "partial");
+        assert_eq!(log.range(), (1, 3));
+    }
 
     #[test]
     fn diff_lines_trims_common_context() {

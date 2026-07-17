@@ -227,6 +227,37 @@ export const useCanvas = ({ seed, wsId, onPersist }: UseCanvasArgs) => {
     });
   }, []);
 
+  const addRunView = React.useCallback((srcId: string, cwd: string, sessionId: string, cmd: string) => {
+    setTiles((prev) => {
+      const existing = prev.find((t) => t.runCwd === cwd);
+      if (existing) {
+        setActiveTile(existing.id);
+        return prev;
+      }
+      const src = prev.find((t) => t.id === srcId);
+      const width = src?.width ?? TILE_WIDTH;
+      const height = src?.height ?? TILE_HEIGHT;
+      const id = createId();
+      setActiveTile(id);
+      return [
+        ...prev,
+        {
+          id,
+          type: 'term' as const,
+          runCwd: cwd,
+          ptySessionId: sessionId,
+          cwd,
+          autoTitle: cmd,
+          x: src ? src.x + src.width : 0,
+          y: src ? src.y : 0,
+          width,
+          height,
+          zIndex: prev.reduce((m, t) => Math.max(m, t.zIndex), 0) + 1
+        }
+      ];
+    });
+  }, []);
+
   const addNote = React.useCallback((center?: { x: number; y: number }) => {
     setView((v) => {
       const cx = center ? center.x : (window.innerWidth / 2 - v.x) / v.k;
@@ -326,7 +357,7 @@ export const useCanvas = ({ seed, wsId, onPersist }: UseCanvasArgs) => {
 
   const closeTile = React.useCallback((id: string) => {
     const closing = tilesRef.current.find((t) => t.id === id);
-    if (closing) {
+    if (closing && !closing.runCwd) {
       const ws = wsIdRef.current;
       saveClosed(ws, [...loadClosed(ws), closing]);
     }
@@ -820,6 +851,7 @@ export const useCanvas = ({ seed, wsId, onPersist }: UseCanvasArgs) => {
     onWheel,
     addTile,
     addCode,
+    addRunView,
     patchTile,
     addFrame,
     duplicateTile,
