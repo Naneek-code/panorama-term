@@ -1051,12 +1051,16 @@ fn emit_event(event: &str) {
     let seq = format!("\x1b]777;notify;{AGENT_EVENT_SENTINEL};{body}\x07");
     let mut out = serde_json::json!({ "terminalSequence": seq });
     if event == "prompt-submit" {
-        if let Some(ctx) = linked_notes_context() {
+        let parts: Vec<String> = [linked_notes_context(), linked_peers_context()]
+            .into_iter()
+            .flatten()
+            .collect();
+        if !parts.is_empty() {
             out.as_object_mut().unwrap().insert(
                 "hookSpecificOutput".into(),
                 serde_json::json!({
                     "hookEventName": "UserPromptSubmit",
-                    "additionalContext": ctx,
+                    "additionalContext": parts.join("\n\n"),
                 }),
             );
         }
@@ -1133,6 +1137,31 @@ fn linked_notes_context() -> Option<String> {
             .to_string(),
     );
     Some(lines.join("\n"))
+}
+
+fn linked_peers_context() -> Option<String> {
+    let tile_id = std::env::var("PANORAMA_TILE_ID").ok()?;
+    let rec = read_binding_rec(&tile_id)?;
+    let peers = rec.get("peers").and_then(|p| p.as_array())?;
+    let entries: Vec<String> = peers
+        .iter()
+        .filter_map(|p| {
+            let id = p.get("tileId").and_then(|v| v.as_str())?;
+            let name = p.get("name").and_then(|v| v.as_str()).unwrap_or("agent");
+            Some(format!("- \"{name}\": tileId {id}"))
+        })
+        .collect();
+    if entries.is_empty() {
+        return None;
+    }
+    let base = format!("http://127.0.0.1:{}", port());
+    Some(format!(
+        "Other terminals on this canvas are linked to yours; each may run its own agent or shell. Only interact with them when the user asks (e.g. \"ask X to...\", \"tell X...\", \"check on X\"):\n\
+         - send a message: curl -s -X POST \"{base}/agent/send?tileId=<tileId>\" --data-raw \"your message\"\n\
+         - read its screen: curl -s \"{base}/capture?tileId=<tileId>&lines=80\"\n\
+         A send types the message into that terminal and presses Enter. After sending, wait, then read the screen to see the reply; long tasks can take minutes, so poll with pauses instead of resending. Linked terminals:\n{}",
+        entries.join("\n")
+    ))
 }
 
 fn install_claude_hook() {
@@ -2064,6 +2093,34 @@ fn current_command_line(s: &Arc<Session>) -> Option<String> {
     }
 }
 
+fn send_to_session(s: &Arc<Session>, text: &str) {
+    let msg = text.trim_end_matches(['\r', '\n']).to_string();
+    let bracketed = s
+        .parser
+        .lock()
+        .map(|p| p.screen().bracketed_paste())
+        .unwrap_or(false);
+    if let Ok(mut w) = s.writer.lock() {
+        let _ = if bracketed {
+            w.write_all(format!("\x1b[200~{msg}\x1b[201~").as_bytes())
+        } else {
+            w.write_all(msg.as_bytes())
+        };
+        let _ = w.flush();
+    }
+    s.scrollback.store(0, Ordering::Relaxed);
+    s.dirty.store(true, Ordering::Relaxed);
+    let s = s.clone();
+    tokio::spawn(async move {
+        tokio::time::sleep(Duration::from_millis(150)).await;
+        if let Ok(mut w) = s.writer.lock() {
+            let _ = w.write_all(b"\r");
+            let _ = w.flush();
+        }
+        s.dirty.store(true, Ordering::Relaxed);
+    });
+}
+
 fn handle_client_msg(s: &Arc<Session>, text: &str) {
     let v: serde_json::Value = match serde_json::from_str(text) {
         Ok(v) => v,
@@ -2401,6 +2458,38 @@ async fn handle_conn(mut stream: TcpStream) {
             "HTTP/1.1 200 OK\r\nAccess-Control-Allow-Origin: *\r\nContent-Type: text/plain; charset=utf-8\r\nContent-Length: {}\r\n\r\n{}",
             text.len(),
             text
+        );
+        let _ = stream.write_all(resp.as_bytes()).await;
+        return;
+    }
+
+    if path_only == "/agent/send" {
+        let q = parse_query(query);
+        let tid = q.get("tileId").cloned().unwrap_or_default();
+        let len = headers
+            .get("content-length")
+            .and_then(|v| v.parse::<usize>().ok())
+            .unwrap_or(0);
+        let mut text = String::new();
+        if len > 0 && len <= STATUS_POST_MAX {
+            let mut body = vec![0u8; len];
+            if stream.read_exact(&mut body).await.is_ok() {
+                text = String::from_utf8_lossy(&body).into_owned();
+            }
+        }
+        let s = sessions().lock().unwrap().get(&tid).cloned();
+        let body = match s {
+            Some(s) if !text.trim().is_empty() => {
+                send_to_session(&s, &text);
+                "{\"ok\":true}".to_string()
+            }
+            Some(_) => serde_json::json!({ "error": "empty message body" }).to_string(),
+            None => serde_json::json!({ "error": "no session for tile" }).to_string(),
+        };
+        let resp = format!(
+            "HTTP/1.1 200 OK\r\nAccess-Control-Allow-Origin: *\r\nContent-Type: application/json\r\nContent-Length: {}\r\n\r\n{}",
+            body.len(),
+            body
         );
         let _ = stream.write_all(resp.as_bytes()).await;
         return;

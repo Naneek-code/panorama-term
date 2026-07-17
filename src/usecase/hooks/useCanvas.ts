@@ -9,9 +9,9 @@ import { tileInFrame } from '~/usecase/util/frame';
 import { getSetting } from '~/adapter/settings/settings.client';
 import { restTarget } from '~/usecase/util/zoomUtils';
 import { killPtySession } from '~/adapter/pty/sidecar.client';
-import { linkNote, unlinkNote, deleteNote } from '~/adapter/notes/notes.client';
+import { linkNote, unlinkNote, deleteNote, linkTerm, unlinkTerm } from '~/adapter/notes/notes.client';
 import { computeDragSnap, computeResizeSnap } from '~/usecase/util/magneticSnap';
-import { noteLinkTitle } from '~/usecase/util/noteLink';
+import { termName, noteLinkTitle } from '~/usecase/util/noteLink';
 import { NOTE_DEFAULT_COLOR } from '~/usecase/util/note';
 import { toStored, toRuntime, type RuntimeCanvas } from '~/usecase/util/workspaceCanvas';
 import {
@@ -303,6 +303,27 @@ export const useCanvas = ({ seed, wsId, onPersist }: UseCanvasArgs) => {
     void unlinkNote(noteId, termId).catch(() => {});
   }, []);
 
+  const linkTermTo = React.useCallback((termId: string, peerId: string) => {
+    const a = tilesRef.current.find((t) => t.id === termId);
+    const b = tilesRef.current.find((t) => t.id === peerId);
+    if (!a || !b || termId === peerId || (b.linkedTo ?? []).includes(termId)) return;
+    setTiles((prev) =>
+      prev.map((t) => (t.id === termId ? { ...t, linkedTo: [...new Set([...(t.linkedTo ?? []), peerId])] } : t))
+    );
+    void linkTerm(termId, termName(a), peerId, termName(b)).catch(() => {});
+  }, []);
+
+  const unlinkTermFrom = React.useCallback((termId: string, peerId: string) => {
+    setTiles((prev) =>
+      prev.map((t) =>
+        t.id === termId || t.id === peerId
+          ? { ...t, linkedTo: (t.linkedTo ?? []).filter((id) => id !== termId && id !== peerId) }
+          : t
+      )
+    );
+    void unlinkTerm(termId, peerId).catch(() => {});
+  }, []);
+
   const closeTile = React.useCallback((id: string) => {
     const closing = tilesRef.current.find((t) => t.id === id);
     if (closing) {
@@ -314,14 +335,17 @@ export const useCanvas = ({ seed, wsId, onPersist }: UseCanvasArgs) => {
       if (wsIdRef.current) void deleteNote(wsIdRef.current, id).catch(() => {});
     }
     if (closing?.type === 'term') {
+      for (const peerId of closing.linkedTo ?? []) void unlinkTerm(id, peerId).catch(() => {});
       for (const t of tilesRef.current) {
-        if (t.type === 'note' && (t.linkedTo ?? []).includes(id)) void unlinkNote(t.id, id).catch(() => {});
+        if (!(t.linkedTo ?? []).includes(id)) continue;
+        if (t.type === 'note') void unlinkNote(t.id, id).catch(() => {});
+        if (t.type === 'term') void unlinkTerm(t.id, id).catch(() => {});
       }
     }
     setTiles((prev) =>
       prev
         .filter((t) => t.id !== id)
-        .map((t) => (t.type === 'note' && (t.linkedTo ?? []).includes(id) ? { ...t, linkedTo: (t.linkedTo ?? []).filter((x) => x !== id) } : t))
+        .map((t) => ((t.linkedTo ?? []).includes(id) ? { ...t, linkedTo: (t.linkedTo ?? []).filter((x) => x !== id) } : t))
     );
     setActiveTile((a) => (a === id ? null : a));
     void killPtySession(id);
@@ -803,6 +827,8 @@ export const useCanvas = ({ seed, wsId, onPersist }: UseCanvasArgs) => {
     snapTile,
     linkNoteTo,
     unlinkNoteFrom,
+    linkTermTo,
+    unlinkTermFrom,
     dragFrame,
     closeTile,
     reopenTile,

@@ -429,6 +429,8 @@ pub fn run() {
             docker::docker_engine,
             notes::link_note,
             notes::unlink_note,
+            notes::link_term,
+            notes::unlink_term,
             notes::read_note,
             notes::write_note,
             notes::delete_note,

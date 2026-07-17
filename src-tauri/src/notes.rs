@@ -126,6 +126,49 @@ pub fn link_note(
     Ok(md_str)
 }
 
+fn peers_upsert(tile_id: &str, peer_id: &str, peer_name: &str) -> Result<(), String> {
+    let bp = binding_path(tile_id).ok_or("no home dir")?;
+    let mut rec: serde_json::Value = fs::read_to_string(&bp)
+        .ok()
+        .and_then(|s| serde_json::from_str(&s).ok())
+        .filter(|v: &serde_json::Value| v.is_object())
+        .unwrap_or_else(|| serde_json::json!({}));
+    let obj = rec.as_object_mut().unwrap();
+    obj.entry("tileId")
+        .or_insert_with(|| serde_json::Value::String(tile_id.to_string()));
+    let peers = obj.entry("peers").or_insert_with(|| serde_json::json!([]));
+    if !peers.is_array() {
+        *peers = serde_json::json!([]);
+    }
+    let arr = peers.as_array_mut().unwrap();
+    arr.retain(|p| p.get("tileId").and_then(|v| v.as_str()) != Some(peer_id));
+    arr.push(serde_json::json!({ "tileId": peer_id, "name": peer_name }));
+    fs::write(&bp, rec.to_string()).map_err(|e| e.to_string())
+}
+
+fn peers_remove(tile_id: &str, peer_id: &str) {
+    let Some(bp) = binding_path(tile_id) else { return };
+    let Ok(raw) = fs::read_to_string(&bp) else { return };
+    let Ok(mut rec) = serde_json::from_str::<serde_json::Value>(&raw) else { return };
+    if let Some(arr) = rec.get_mut("peers").and_then(|p| p.as_array_mut()) {
+        arr.retain(|p| p.get("tileId").and_then(|v| v.as_str()) != Some(peer_id));
+    }
+    let _ = fs::write(&bp, rec.to_string());
+}
+
+#[tauri::command]
+pub fn link_term(a_id: String, a_name: String, b_id: String, b_name: String) -> Result<(), String> {
+    peers_upsert(&a_id, &b_id, &b_name)?;
+    peers_upsert(&b_id, &a_id, &a_name)
+}
+
+#[tauri::command]
+pub fn unlink_term(a_id: String, b_id: String) -> Result<(), String> {
+    peers_remove(&a_id, &b_id);
+    peers_remove(&b_id, &a_id);
+    Ok(())
+}
+
 #[tauri::command]
 pub fn unlink_note(note_id: String, term_tile_id: String) -> Result<(), String> {
     if let Some(bp) = binding_path(&term_tile_id) {

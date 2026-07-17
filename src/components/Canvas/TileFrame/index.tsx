@@ -337,6 +337,7 @@ const TileFrame = ({ tile, view, active, selected, alert, visible, live, hidden,
           icon: <ShieldCheck size={15} strokeWidth={1.75} />,
           onSelect: toggleElevated
         },
+        ...linkItems,
         { label: 'Focus', icon: <Focus size={15} strokeWidth={1.75} />, onSelect: focusTile },
         fullscreenItem,
         'separator',
@@ -480,6 +481,18 @@ const TileFrame = ({ tile, view, active, selected, alert, visible, live, hidden,
                 aria-label={tile.pinned ? 'Unpin tile' : 'Pin tile'}
               >
                 {tile.pinned ? <PinOff size={13} strokeWidth={2} /> : <Pin size={13} strokeWidth={2} />}
+              </button>
+            )}
+            {!note && !fullscreen && (
+              <button
+                className={linkedTerms.length ? `${styles.action} ${styles.linked}` : styles.action}
+                onPointerDown={startLinkDrag}
+                aria-label="Link to another terminal"
+                data-tooltip="Link to agent"
+              >
+                <span className={styles.rawGlyph}>
+                  <Link2 size={12} strokeWidth={2} />
+                </span>
               </button>
             )}
             {!note && (

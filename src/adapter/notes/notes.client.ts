@@ -14,3 +14,9 @@ export const linkNote = (wsId: string, noteId: string, termTileId: string, title
 
 export const unlinkNote = (noteId: string, termTileId: string): Promise<void> =>
   invoke('unlink_note', { noteId, termTileId });
+
+export const linkTerm = (aId: string, aName: string, bId: string, bName: string): Promise<void> =>
+  invoke('link_term', { aId, aName, bId, bName });
+
+export const unlinkTerm = (aId: string, bId: string): Promise<void> =>
+  invoke('unlink_term', { aId, bId });

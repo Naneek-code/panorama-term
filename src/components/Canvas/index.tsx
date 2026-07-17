@@ -76,6 +76,8 @@ const Canvas = () => {
     snapTile,
     linkNoteTo,
     unlinkNoteFrom,
+    linkTermTo,
+    unlinkTermFrom,
     dragFrame,
     closeTile,
     reopenTile,
@@ -135,17 +137,17 @@ const Canvas = () => {
   const fsTimer = React.useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
   const activated = React.useRef<Set<string>>(new Set());
 
-  const [linkDrag, setLinkDrag] = React.useState<{ noteId: string; x: number; y: number; over: string | null } | null>(null);
+  const [linkDrag, setLinkDrag] = React.useState<{ srcId: string; x: number; y: number; over: string | null } | null>(null);
   const viewR = React.useRef(view);
   viewR.current = view;
   const tilesR = React.useRef(tiles);
   tilesR.current = tiles;
-  const dragId = linkDrag?.noteId ?? null;
+  const dragId = linkDrag?.srcId ?? null;
 
-  const startLinkDrag = React.useCallback((noteId: string, e: React.PointerEvent) => {
+  const startLinkDrag = React.useCallback((srcId: string, e: React.PointerEvent) => {
     e.stopPropagation();
     e.preventDefault();
-    setLinkDrag({ noteId, x: e.clientX, y: e.clientY, over: null });
+    setLinkDrag({ srcId, x: e.clientX, y: e.clientY, over: null });
   }, []);
 
   React.useEffect(() => {
@@ -155,13 +157,17 @@ const Canvas = () => {
       const wx = (e.clientX - v.x) / v.k;
       const wy = (e.clientY - v.y) / v.k;
       const term = tilesR.current.find(
-        (t) => t.type === 'term' && wx >= t.x && wx <= t.x + t.width && wy >= t.y && wy <= t.y + t.height
+        (t) => t.type === 'term' && t.id !== dragId && wx >= t.x && wx <= t.x + t.width && wy >= t.y && wy <= t.y + t.height
       );
       setLinkDrag((d) => (d ? { ...d, x: e.clientX, y: e.clientY, over: term?.id ?? null } : d));
     };
     const up = () =>
       setLinkDrag((d) => {
-        if (d?.over) linkNoteTo(d.noteId, d.over);
+        if (d?.over) {
+          const src = tilesR.current.find((t) => t.id === d.srcId);
+          if (src?.type === 'term') linkTermTo(d.srcId, d.over);
+          else linkNoteTo(d.srcId, d.over);
+        }
         return null;
       });
     window.addEventListener('pointermove', move);
@@ -170,7 +176,7 @@ const Canvas = () => {
       window.removeEventListener('pointermove', move);
       window.removeEventListener('pointerup', up);
     };
-  }, [dragId, linkNoteTo]);
+  }, [dragId, linkNoteTo, linkTermTo]);
 
   React.useEffect(() => {
     const onResize = () => setSize({ w: window.innerWidth, h: window.innerHeight });
@@ -547,16 +553,17 @@ const Canvas = () => {
         {!fsId && (
           <svg className={styles.links} width={size.w} height={size.h}>
             {tiles.map((t) => {
-              if (t.type !== 'note' || !t.linkedTo?.length) return null;
-              const noteRect = { x: t.x * view.k + view.x, y: t.y * view.k + view.y, width: t.width * view.k, height: t.height * view.k };
+              if ((t.type !== 'note' && t.type !== 'term') || !t.linkedTo?.length) return null;
+              const srcRect = { x: t.x * view.k + view.x, y: t.y * view.k + view.y, width: t.width * view.k, height: t.height * view.k };
               return t.linkedTo.map((termId) => {
                 const term = tiles.find((x) => x.id === termId);
                 if (!term) return null;
                 const termRect = { x: term.x * view.k + view.x, y: term.y * view.k + view.y, width: term.width * view.k, height: term.height * view.k };
-                const d = flowPath(noteRect, termRect);
+                const d = flowPath(srcRect, termRect);
                 const removeLink = (e: React.PointerEvent) => {
                   e.stopPropagation();
-                  unlinkNoteFrom(t.id, termId);
+                  if (t.type === 'term') unlinkTermFrom(t.id, termId);
+                  else unlinkNoteFrom(t.id, termId);
                 };
                 return (
                   <g key={`${t.id}-${termId}`} className={styles.linkGroup} onPointerDown={removeLink}>
@@ -568,10 +575,10 @@ const Canvas = () => {
             })}
             {linkDrag &&
               (() => {
-                const note = tiles.find((x) => x.id === linkDrag.noteId);
-                if (!note) return null;
-                const noteRect = { x: note.x * view.k + view.x, y: note.y * view.k + view.y, width: note.width * view.k, height: note.height * view.k };
-                const d = flowPath(noteRect, { x: linkDrag.x, y: linkDrag.y, width: 0, height: 0 });
+                const src = tiles.find((x) => x.id === linkDrag.srcId);
+                if (!src) return null;
+                const srcRect = { x: src.x * view.k + view.x, y: src.y * view.k + view.y, width: src.width * view.k, height: src.height * view.k };
+                const d = flowPath(srcRect, { x: linkDrag.x, y: linkDrag.y, width: 0, height: 0 });
                 return <path d={d} className={styles.linkLine} />;
               })()}
             {linkDrag?.over &&
@@ -599,8 +606,13 @@ const Canvas = () => {
           const vis = isVisible(t);
           if (vis && (t.width - TILE_GAP) * view.k >= MIN_LIVE_WIDTH) activated.current.add(t.id);
           const live = activated.current.has(t.id);
-          const linkedIds = t.type === 'note' ? t.linkedTo ?? [] : [];
-          const linkActive = linkedIds.some((id) => id === activeTile || selected.has(id));
+          const linkedIds =
+            t.type === 'note'
+              ? t.linkedTo ?? []
+              : t.type === 'term'
+                ? [...new Set([...(t.linkedTo ?? []), ...tiles.filter((x) => x.type === 'term' && (x.linkedTo ?? []).includes(t.id)).map((x) => x.id)])]
+                : [];
+          const linkActive = t.type === 'note' && linkedIds.some((id) => id === activeTile || selected.has(id));
           const cand = t.type === 'note' ? adjacentTerm(t, tiles) : null;
           const linkCand = cand && !linkedIds.includes(cand.id) ? cand : null;
           const linkedTerms = linkedIds
@@ -617,7 +629,7 @@ const Canvas = () => {
               linkTarget={linkCand ? { id: linkCand.id, name: termName(linkCand) } : null}
               linkedTerms={linkedTerms}
               onLink={linkNoteTo}
-              onUnlink={unlinkNoteFrom}
+              onUnlink={t.type === 'term' ? unlinkTermFrom : unlinkNoteFrom}
               onLinkDragStart={startLinkDrag}
               onMove={moveTile}
               onSnap={snapTile}
