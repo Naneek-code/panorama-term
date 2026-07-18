@@ -69,6 +69,8 @@ const fgOf = (w0: number): string => {
 
 const esc = (s: string): string => s.replace(/&/g, '&amp;').replace(/</g, '&lt;');
 
+const isSym = (cp: number): boolean => (cp >= 0x2600 && cp <= 0x27bf) || cp === 0x2217;
+
 const isWide = (cp: number): boolean =>
   cp >= 0x1100 &&
   (cp <= 0x115f ||
@@ -132,6 +134,16 @@ const rowHtml = (line: string, attrs: Uint32Array, r: number, nCols: number): st
     const block = cp >= 0x2580 && cp <= 0x259f;
     let style: string;
     let text: string;
+    if (!block && isSym(cp)) {
+      flush();
+      runStyle = '';
+      const isDefault = (w0 & 0xffffff) === DEFAULT_FG && !bold && !hasBg;
+      const symStyle = `width:7.23px;text-align:center;font-family:'Segoe UI Symbol',monospace${
+        isDefault ? '' : `;color:${fgOf(w0)}${bold ? ';font-weight:700' : ''}${hasBg ? `;background:${hex(w1)}` : ''}`
+      }`;
+      html += `<span style="${symStyle}">${esc(ch)}</span>`;
+      continue;
+    }
     if (!block && isWide(cp) && (cells[c + 1] ?? ' ') === ' ') {
       flush();
       runStyle = '';
