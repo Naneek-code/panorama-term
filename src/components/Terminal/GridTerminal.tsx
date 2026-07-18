@@ -69,6 +69,17 @@ const fgOf = (w0: number): string => {
 
 const esc = (s: string): string => s.replace(/&/g, '&amp;').replace(/</g, '&lt;');
 
+const isWide = (cp: number): boolean =>
+  cp >= 0x1100 &&
+  (cp <= 0x115f ||
+    (cp >= 0x2e80 && cp <= 0xa4cf) ||
+    (cp >= 0xac00 && cp <= 0xd7a3) ||
+    (cp >= 0xf900 && cp <= 0xfaff) ||
+    (cp >= 0xfe30 && cp <= 0xfe4f) ||
+    (cp >= 0xff00 && cp <= 0xff60) ||
+    (cp >= 0xffe0 && cp <= 0xffe6) ||
+    cp >= 0x1f000);
+
 const QUAD = [0b0010, 0b0001, 0b1000, 0b1011, 0b1001, 0b1110, 0b1101, 0b0100, 0b0110, 0b0111];
 
 const quadLayer = (a: number, b: number, q: number): string => {
@@ -121,6 +132,17 @@ const rowHtml = (line: string, attrs: Uint32Array, r: number, nCols: number): st
     const block = cp >= 0x2580 && cp <= 0x259f;
     let style: string;
     let text: string;
+    if (!block && isWide(cp) && (cells[c + 1] ?? ' ') === ' ') {
+      flush();
+      runStyle = '';
+      const isDefault = (w0 & 0xffffff) === DEFAULT_FG && !bold && !hasBg;
+      const wideStyle = isDefault
+        ? 'width:2ch'
+        : `width:2ch;color:${fgOf(w0)}${bold ? ';font-weight:700' : ''}${hasBg ? `;background:${hex(w1)}` : ''}`;
+      html += `<span style="${wideStyle}">${esc(ch)}</span>`;
+      c++;
+      continue;
+    }
     if (block) {
       style = `color:${fgOf(w0)};${blockCss(cp)}${hasBg ? `;background-color:${hex(w1)}` : ''}`;
       text = ' ';
