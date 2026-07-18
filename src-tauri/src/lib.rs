@@ -1,5 +1,5 @@
 use std::net::TcpStream;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
 use std::time::Duration;
 
@@ -12,11 +12,24 @@ mod notes;
 mod claude;
 
 const SIDECAR_PORT: u16 = 9777;
+const HOST_PORT: u16 = 9778;
 const NOTIF_WIDTH: f64 = 448.0;
 
-fn sidecar_alive() -> bool {
-    let addr = format!("127.0.0.1:{SIDECAR_PORT}").parse().unwrap();
+fn host_alive() -> bool {
+    let addr = format!("127.0.0.1:{HOST_PORT}").parse().unwrap();
     TcpStream::connect_timeout(&addr, Duration::from_millis(300)).is_ok()
+}
+
+fn host_bin(brain: &Path) -> PathBuf {
+    if !cfg!(debug_assertions) {
+        return brain.to_path_buf();
+    }
+    let dst = std::env::temp_dir().join("panorama-host.exe");
+    if std::fs::copy(brain, &dst).is_ok() {
+        dst
+    } else {
+        brain.to_path_buf()
+    }
 }
 
 fn sidecar_bin() -> PathBuf {
@@ -38,7 +51,7 @@ fn sidecar_bin() -> PathBuf {
 }
 
 fn spawn_sidecar() {
-    if sidecar_alive() {
+    if host_alive() {
         return;
     }
     let bin = sidecar_bin();
@@ -46,9 +59,16 @@ fn spawn_sidecar() {
         eprintln!("[panorama] sidecar binary missing: {}", bin.display());
         return;
     }
+    let host = host_bin(&bin);
     let make = || {
-        let mut cmd = Command::new(&bin);
-        cmd.stdin(Stdio::null()).stdout(Stdio::null()).stderr(Stdio::null());
+        let mut cmd = Command::new(&host);
+        cmd.arg("host")
+            .env("PANORAMA_BRAIN_BIN", &bin)
+            .env("PANORAMA_HOST_PORT", HOST_PORT.to_string())
+            .env("PANORAMA_SIDECAR_PORT", SIDECAR_PORT.to_string())
+            .stdin(Stdio::null())
+            .stdout(Stdio::null())
+            .stderr(Stdio::null());
         cmd
     };
 
