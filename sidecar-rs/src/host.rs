@@ -494,6 +494,7 @@ fn host_spawn(
     for (k, val) in &env {
         cmd.env(k, val);
     }
+    cmd.env_remove("NO_COLOR");
     cmd.cwd(&cwd);
 
     let child = pair
