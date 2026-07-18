@@ -1,12 +1,13 @@
 use std::collections::{HashMap, HashSet};
 use std::io::{Read, Seek, SeekFrom, Write};
 use std::path::{Path, PathBuf};
-use std::sync::atomic::{AtomicBool, AtomicU16, AtomicUsize, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU16, AtomicU64, AtomicUsize, Ordering};
+use std::sync::mpsc::{channel as mpsc_channel, Receiver as MpscReceiver, Sender as MpscSender};
 use std::sync::{Arc, Mutex, OnceLock};
 use std::time::{Duration, Instant};
 
+use base64::Engine as _;
 use futures_util::{SinkExt, StreamExt};
-use portable_pty::{native_pty_system, CommandBuilder, PtySize};
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::net::{TcpListener, TcpStream};
 use tokio_tungstenite::tungstenite::handshake::derive_accept_key;
@@ -15,6 +16,185 @@ use tokio_tungstenite::tungstenite::Message;
 use tokio_tungstenite::WebSocketStream;
 
 mod host;
+
+enum ConsumerMsg {
+    Data(Vec<u8>),
+    Exit { code: Option<u32> },
+}
+
+struct HostHandle {
+    host: host::Host,
+    tx: MpscSender<Vec<u8>>,
+    next_id: AtomicU64,
+    pending: Mutex<HashMap<u64, MpscSender<serde_json::Value>>>,
+    consumers: Mutex<HashMap<String, MpscSender<ConsumerMsg>>>,
+    outbound_rx: Mutex<Option<MpscReceiver<Vec<u8>>>>,
+}
+
+impl HostHandle {
+    fn rpc_raw(&self, payload: serde_json::Value) -> Result<serde_json::Value, String> {
+        let id = self.next_id.fetch_add(1, Ordering::Relaxed);
+        let mut msg = payload;
+        msg["id"] = serde_json::json!(id);
+        let (reply_tx, reply_rx) = mpsc_channel();
+        self.pending.lock().unwrap_or_else(|e| e.into_inner()).insert(id, reply_tx);
+        let frame = host::encode(host::KIND_RPC, msg.to_string().as_bytes());
+        self.tx.send(frame).map_err(|e| format!("host send: {e}"))?;
+        reply_rx.recv().map_err(|e| format!("host reply: {e}"))
+    }
+
+    fn spawn_pty(
+        &self,
+        key: &str,
+        cwd: &str,
+        cols: u16,
+        rows: u16,
+        exe: &str,
+        args: &[String],
+        env: &[(String, String)],
+        seed: &[u8],
+    ) -> Result<u32, String> {
+        let seed_b64 = base64::engine::general_purpose::STANDARD.encode(seed);
+        let reply = self.rpc_raw(serde_json::json!({
+            "op": "spawn",
+            "key": key,
+            "cwd": cwd,
+            "cols": cols,
+            "rows": rows,
+            "exe": exe,
+            "args": args,
+            "env": env.iter().map(|(k, v)| [k, v]).collect::<Vec<_>>(),
+            "seed": seed_b64,
+        }))?;
+        if !reply["ok"].as_bool().unwrap_or(false) {
+            return Err(reply["err"].as_str().unwrap_or("spawn failed").to_string());
+        }
+        Ok(reply["pid"].as_u64().unwrap_or(0) as u32)
+    }
+
+    fn register_consumer(&self, key: &str, tx: MpscSender<ConsumerMsg>) {
+        self.consumers.lock().unwrap_or_else(|e| e.into_inner()).insert(key.to_string(), tx);
+    }
+
+    fn subscribe(&self, key: &str, from_offset: u64) -> Result<(), String> {
+        let reply = self.rpc_raw(serde_json::json!({
+            "op": "subscribe",
+            "key": key,
+            "from_offset": from_offset,
+        }))?;
+        if !reply["ok"].as_bool().unwrap_or(false) {
+            return Err(reply["err"].as_str().unwrap_or("subscribe failed").to_string());
+        }
+        Ok(())
+    }
+
+    fn write(&self, key: &str, bytes: &[u8]) {
+        let payload = host::encode_input_payload(key, bytes);
+        let _ = self.tx.send(host::encode(host::KIND_INPUT, &payload));
+    }
+
+    fn resize(&self, key: &str, cols: u16, rows: u16) {
+        let id = self.next_id.fetch_add(1, Ordering::Relaxed);
+        let frame = host::encode(
+            host::KIND_RPC,
+            serde_json::json!({ "id": id, "op": "resize", "key": key, "cols": cols, "rows": rows })
+                .to_string()
+                .as_bytes(),
+        );
+        let _ = self.tx.send(frame);
+    }
+
+    fn kill(&self, key: &str) {
+        let id = self.next_id.fetch_add(1, Ordering::Relaxed);
+        let frame = host::encode(
+            host::KIND_RPC,
+            serde_json::json!({ "id": id, "op": "kill", "key": key })
+                .to_string()
+                .as_bytes(),
+        );
+        let _ = self.tx.send(frame);
+    }
+
+    fn snapshot(&self, key: &str) -> Vec<u8> {
+        self.host.snapshot(key)
+    }
+
+}
+
+fn brain_dispatcher(h: &'static HostHandle, out_rx: MpscReceiver<Vec<u8>>) {
+    loop {
+        let frame = match out_rx.recv() {
+            Ok(f) => f,
+            Err(_) => break,
+        };
+        let (kind, payload) = match host::decode(&frame).map(|(k, p, _)| (k, p)) {
+            Some(x) => x,
+            None => continue,
+        };
+        match kind {
+            host::KIND_DATA => {
+                if let Some((key, _offset, bytes)) = host::decode_data_payload(&payload) {
+                    let consumers = h.consumers.lock().unwrap_or_else(|e| e.into_inner());
+                    if let Some(tx) = consumers.get(&key) {
+                        let _ = tx.send(ConsumerMsg::Data(bytes));
+                    }
+                }
+            }
+            host::KIND_RPC_REPLY => {
+                if let Ok(v) = serde_json::from_slice::<serde_json::Value>(&payload) {
+                    let id = v["id"].as_u64().unwrap_or(u64::MAX);
+                    let mut pending = h.pending.lock().unwrap_or_else(|e| e.into_inner());
+                    if let Some(tx) = pending.remove(&id) {
+                        let _ = tx.send(v);
+                    }
+                }
+            }
+            host::KIND_EVENT => {
+                if let Ok(ev) = serde_json::from_slice::<serde_json::Value>(&payload) {
+                    if ev["kind"] == "exit" {
+                        let key = ev["key"].as_str().unwrap_or("").to_string();
+                        let code = ev["code"].as_u64().map(|c| c as u32);
+                        let consumers = h.consumers.lock().unwrap_or_else(|e| e.into_inner());
+                        if let Some(tx) = consumers.get(&key) {
+                            let _ = tx.send(ConsumerMsg::Exit { code });
+                        }
+                    }
+                }
+            }
+            _ => {}
+        }
+    }
+}
+
+fn host_handle() -> &'static HostHandle {
+    static H: OnceLock<HostHandle> = OnceLock::new();
+    H.get_or_init(|| {
+        let (in_tx, in_rx) = mpsc_channel::<Vec<u8>>();
+        let (out_tx, out_rx) = mpsc_channel::<Vec<u8>>();
+        let h = host::Host::new();
+        h.start(in_rx, out_tx);
+        HostHandle {
+            host: h,
+            tx: in_tx,
+            next_id: AtomicU64::new(1),
+            pending: Mutex::new(HashMap::new()),
+            consumers: Mutex::new(HashMap::new()),
+            outbound_rx: Mutex::new(Some(out_rx)),
+        }
+    });
+    static DISP: OnceLock<()> = OnceLock::new();
+    DISP.get_or_init(|| {
+        let handle: &'static HostHandle = H.get().unwrap();
+        let rx = handle
+            .outbound_rx
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .take()
+            .unwrap();
+        std::thread::spawn(move || brain_dispatcher(handle, rx));
+    });
+    H.get().unwrap()
+}
 
 const PORT: u16 = 9777;
 const DAEMON_ARG: &str = "--daemon";
@@ -609,13 +789,9 @@ impl RawRing {
 struct Session {
     tile_id: String,
     shell: String,
+    pid: u32,
     parser: Mutex<vt100::Parser<CwdSink>>,
-    writer: Mutex<Box<dyn Write + Send>>,
-    master: Mutex<Box<dyn portable_pty::MasterPty + Send>>,
-    child: Mutex<Box<dyn portable_pty::Child + Send + Sync>>,
-    raw: Mutex<RawRing>,
     dirty: AtomicBool,
-    raw_dirty: AtomicBool,
     exited: AtomicBool,
     visible: AtomicBool,
     cols: AtomicU16,
@@ -659,10 +835,10 @@ fn load_buffer(tile_id: &str) -> Vec<u8> {
 }
 
 fn flush_session(s: &Session) {
-    if s.run.is_some() || !s.raw_dirty.swap(false, Ordering::Relaxed) {
+    if s.run.is_some() {
         return;
     }
-    let data = s.raw.lock().map(|r| r.snapshot()).unwrap_or_default();
+    let data = host_handle().snapshot(&s.tile_id);
     if let Some(p) = buffer_path(&s.tile_id) {
         let _ = std::fs::write(p, &data);
     }
@@ -1880,11 +2056,9 @@ fn inject_osc7(session: &Arc<Session>, shell: &str) {
             if s.exited.load(Ordering::Relaxed) {
                 return;
             }
-            if let Ok(mut w) = s.writer.lock() {
-                let _ = w.write_all(hook.as_bytes());
-                let _ = w.write_all(b"\n");
-                let _ = w.flush();
-            }
+            let mut bytes = hook.into_bytes();
+            bytes.push(b'\n');
+            host_handle().write(&s.tile_id, &bytes);
         });
     }
 }
@@ -1905,65 +2079,39 @@ fn spawn_session(
         .or_else(|| std::env::var("HOME").ok())
         .unwrap_or_else(|| ".".into());
 
-    let pty_system = native_pty_system();
-    let pair = pty_system
-        .openpty(PtySize {
-            rows,
-            cols,
-            pixel_width: 0,
-            pixel_height: 0,
-        })
-        .map_err(|e| format!("openpty: {e}"))?;
-
-    let mut cmd = if let Some(run_cmd) = &p.spawn_cmd {
-        if cfg!(windows) {
-            let mut c = CommandBuilder::new(resolve_powershell());
-            c.arg("-NoLogo");
-            c.arg("-Command");
-            c.arg(run_cmd);
-            c
+    let (exe, args, mut env): (String, Vec<String>, Vec<(String, String)>) =
+        if let Some(run_cmd) = &p.spawn_cmd {
+            if cfg!(windows) {
+                (
+                    resolve_powershell(),
+                    vec!["-NoLogo".into(), "-Command".into(), run_cmd.clone()],
+                    Vec::new(),
+                )
+            } else {
+                ("/bin/sh".into(), vec!["-lc".into(), run_cmd.clone()], Vec::new())
+            }
+        } else if p.elevated {
+            if !command_exists("gsudo.exe") {
+                return Err(
+                    "gsudo not found - install it with: winget install gerardog.gsudo".into(),
+                );
+            }
+            ("gsudo.exe".into(), vec![shell.clone()], Vec::new())
         } else {
-            let mut c = CommandBuilder::new("/bin/sh");
-            c.arg("-lc");
-            c.arg(run_cmd);
-            c
-        }
-    } else if p.elevated {
-        if !command_exists("gsudo.exe") {
-            return Err("gsudo not found - install it with: winget install gerardog.gsudo".into());
-        }
-        let mut c = CommandBuilder::new("gsudo.exe");
-        c.arg(&shell);
-        c
-    } else {
-        CommandBuilder::new(&shell)
-    };
-    cmd.cwd(&cwd);
-    cmd.env("TERM", "xterm-256color");
-    cmd.env("PANORAMA_TERMINAL", "1");
-    cmd.env("PANORAMA_TILE_ID", &p.tile_id);
+            (shell.clone(), Vec::new(), Vec::new())
+        };
+
+    env.push(("TERM".into(), "xterm-256color".into()));
+    env.push(("PANORAMA_TERMINAL".into(), "1".into()));
+    env.push(("PANORAMA_TILE_ID".into(), p.tile_id.clone()));
     if p.spawn_cmd.is_some() {
         if let Some(path) = fresh_path() {
-            cmd.env("PATH", path);
+            env.push(("PATH".into(), path));
         }
     }
 
-    let child = pair
-        .slave
-        .spawn_command(cmd)
-        .map_err(|e| format!("spawn '{shell}': {e}"))?;
-    let reader = pair
-        .master
-        .try_clone_reader()
-        .map_err(|e| format!("reader: {e}"))?;
-    let writer = pair.master.take_writer().map_err(|e| format!("writer: {e}"))?;
-    drop(pair.slave);
+    let seed = if p.spawn_cmd.is_some() { Vec::new() } else { load_buffer(&p.tile_id) };
 
-    let seed = if p.spawn_cmd.is_some() {
-        Vec::new()
-    } else {
-        load_buffer(&p.tile_id)
-    };
     let focused = Arc::new(AtomicBool::new(true));
     let focus_reporting = Arc::new(AtomicBool::new(false));
     let sink = CwdSink {
@@ -1981,6 +2129,13 @@ fn spawn_session(
         let _ = parser.callbacks_mut().take_progress();
     }
 
+    let pid =
+        host_handle().spawn_pty(&p.tile_id, &cwd, cols, rows, &exe, &args, &env, &seed)?;
+
+    let (consumer_tx, consumer_rx) = mpsc_channel::<ConsumerMsg>();
+    host_handle().register_consumer(&p.tile_id, consumer_tx);
+    host_handle().subscribe(&p.tile_id, 0)?;
+
     let run = p.spawn_cmd.as_ref().map(|run_cmd| RunState {
         cmd: run_cmd.clone(),
         cwd: norm_cwd(&cwd),
@@ -1992,13 +2147,9 @@ fn spawn_session(
     let session = Arc::new(Session {
         tile_id: p.tile_id.clone(),
         shell: p.spawn_cmd.clone().unwrap_or_else(|| shell.clone()),
+        pid,
         parser: Mutex::new(parser),
-        writer: Mutex::new(writer),
-        master: Mutex::new(pair.master),
-        child: Mutex::new(child),
-        raw: Mutex::new(RawRing::new(seed)),
         dirty: AtomicBool::new(true),
-        raw_dirty: AtomicBool::new(false),
         exited: AtomicBool::new(false),
         visible: AtomicBool::new(true),
         cols: AtomicU16::new(cols),
@@ -2021,17 +2172,14 @@ fn spawn_session(
     let s = session.clone();
     std::thread::spawn(move || {
         let mut permit = Some(permit);
-        let mut reader = reader;
-        let mut buf = [0u8; 8192];
         let mut carry: Vec<u8> = Vec::new();
         loop {
-            match reader.read(&mut buf) {
-                Ok(0) | Err(_) => break,
-                Ok(n) => {
+            match consumer_rx.recv() {
+                Ok(ConsumerMsg::Data(raw)) => {
                     permit.take();
-                    let mut data = Vec::with_capacity(carry.len() + n);
+                    let mut data = Vec::with_capacity(carry.len() + raw.len());
                     data.append(&mut carry);
-                    data.extend_from_slice(&buf[..n]);
+                    data.extend_from_slice(&raw);
                     let valid = utf8_valid_len(&data);
                     if valid < data.len() {
                         carry.extend_from_slice(&data[valid..]);
@@ -2073,12 +2221,14 @@ fn spawn_session(
                             }
                         }
                         if let Some(text) = p.callbacks_mut().take_clipboard() {
-                            *s.clipboard.lock().unwrap_or_else(|e| e.into_inner()) = Some(text);
+                            *s.clipboard.lock().unwrap_or_else(|e| e.into_inner()) =
+                                Some(text);
                             s.clipboard_dirty.store(true, Ordering::Relaxed);
                         }
                         if let Some(title) = p.callbacks_mut().take_title() {
                             if title != s.shell {
-                                *s.title.lock().unwrap_or_else(|e| e.into_inner()) = Some(title);
+                                *s.title.lock().unwrap_or_else(|e| e.into_inner()) =
+                                    Some(title);
                                 s.title_dirty.store(true, Ordering::Relaxed);
                             }
                         }
@@ -2089,11 +2239,19 @@ fn spawn_session(
                             }
                         }
                         for (title, body) in p.callbacks_mut().take_notifies() {
-                            let msg = serde_json::json!({ "t": "notify", "title": title, "body": body });
+                            let msg = serde_json::json!({
+                                "t": "notify",
+                                "title": title,
+                                "body": body,
+                            });
                             outgoing.push(msg.to_string());
                         }
                         if let Some((state, pct)) = p.callbacks_mut().take_progress() {
-                            let msg = serde_json::json!({ "t": "progress", "state": state, "pct": pct });
+                            let msg = serde_json::json!({
+                                "t": "progress",
+                                "state": state,
+                                "pct": pct,
+                            });
                             outgoing.push(msg.to_string());
                         }
                         if !outgoing.is_empty() {
@@ -2104,59 +2262,45 @@ fn spawn_session(
                         }
                         p.callbacks_mut().take_responses()
                     };
-                    if !responses.is_empty() {
-                        if let Ok(mut w) = s.writer.lock() {
-                            for resp in &responses {
-                                let _ = w.write_all(resp);
-                            }
-                            let _ = w.flush();
-                        }
+                    for resp in &responses {
+                        host_handle().write(&s.tile_id, resp);
                     }
                     if let Some(run) = &s.run {
                         if let Ok(text) = std::str::from_utf8(chunk) {
                             run.log.lock().unwrap_or_else(|e| e.into_inner()).feed(text);
                         }
                     }
-                    if let Ok(mut raw) = s.raw.lock() {
-                        raw.push(chunk);
-                    }
-                    s.raw_dirty.store(true, Ordering::Relaxed);
                     s.dirty.store(true, Ordering::Relaxed);
                 }
+                Ok(ConsumerMsg::Exit { code }) => {
+                    s.exited.store(true, Ordering::Relaxed);
+                    s.dirty.store(true, Ordering::Relaxed);
+                    if let Some(run) = &s.run {
+                        let mut exit = run.exit.lock().unwrap_or_else(|e| e.into_inner());
+                        if exit.is_none() {
+                            *exit = code;
+                        }
+                    }
+                    flush_session(&s);
+                    if s.run.is_none() {
+                        sessions().lock().unwrap().remove(&s.tile_id);
+                    }
+                    return;
+                }
+                Err(_) => {
+                    s.exited.store(true, Ordering::Relaxed);
+                    s.dirty.store(true, Ordering::Relaxed);
+                    flush_session(&s);
+                    if s.run.is_none() {
+                        sessions().lock().unwrap().remove(&s.tile_id);
+                    }
+                    return;
+                }
             }
-        }
-        s.exited.store(true, Ordering::Relaxed);
-        s.dirty.store(true, Ordering::Relaxed);
-        if s.run.is_none() {
-            flush_session(&s);
-            sessions().lock().unwrap().remove(&s.tile_id);
         }
     });
 
-    if session.run.is_some() {
-        let s = session.clone();
-        std::thread::spawn(move || loop {
-            std::thread::sleep(Duration::from_millis(500));
-            if s.exited.load(Ordering::Relaxed) {
-                return;
-            }
-            let done = {
-                let mut c = s.child.lock().unwrap_or_else(|e| e.into_inner());
-                c.try_wait().ok().flatten()
-            };
-            if let Some(st) = done {
-                if let Some(run) = &s.run {
-                    let mut exit = run.exit.lock().unwrap_or_else(|e| e.into_inner());
-                    if exit.is_none() {
-                        *exit = Some(st.exit_code());
-                    }
-                }
-                s.exited.store(true, Ordering::Relaxed);
-                s.dirty.store(true, Ordering::Relaxed);
-                return;
-            }
-        });
-    } else {
+    if session.run.is_none() {
         inject_osc7(&session, &shell);
     }
     Ok(session)
@@ -2210,14 +2354,7 @@ fn resize_session(s: &Session, cols: u16, rows: u16) {
     }
     s.cols.store(cols, Ordering::Relaxed);
     s.rows.store(rows, Ordering::Relaxed);
-    if let Ok(master) = s.master.lock() {
-        let _ = master.resize(PtySize {
-            rows,
-            cols,
-            pixel_width: 0,
-            pixel_height: 0,
-        });
-    }
+    host_handle().resize(&s.tile_id, cols, rows);
     s.parser
         .lock()
         .unwrap_or_else(|e| e.into_inner())
@@ -2251,11 +2388,8 @@ fn scroll_session(s: &Session, dir: i64, lines: usize, col: usize, row: usize) {
                 seq.extend_from_slice(&[0x1b, b'[', b'M', (cb as u8) + 32, cx, cy]);
             }
         }
-        if let Ok(mut w) = s.writer.lock() {
-            for _ in 0..lines.max(1) {
-                let _ = w.write_all(&seq);
-            }
-            let _ = w.flush();
+        for _ in 0..lines.max(1) {
+            host_handle().write(&s.tile_id, &seq);
         }
         return;
     }
@@ -2267,11 +2401,8 @@ fn scroll_session(s: &Session, dir: i64, lines: usize, col: usize, row: usize) {
             (false, true) => b"\x1bOB",
             (false, false) => b"\x1b[B",
         };
-        if let Ok(mut w) = s.writer.lock() {
-            for _ in 0..lines {
-                let _ = w.write_all(arrow);
-            }
-            let _ = w.flush();
+        for _ in 0..lines {
+            host_handle().write(&s.tile_id, arrow);
         }
         return;
     }
@@ -2328,10 +2459,7 @@ fn mouse_session(s: &Session, kind: u8, button: i64, col: usize, row: usize, mod
             seq.extend_from_slice(&[0x1b, b'[', b'M', (base as u8).saturating_add(32), cx, cy]);
         }
     }
-    if let Ok(mut w) = s.writer.lock() {
-        let _ = w.write_all(&seq);
-        let _ = w.flush();
-    }
+    host_handle().write(&s.tile_id, &seq);
 }
 
 fn focus_session(s: &Session, focused: bool) {
@@ -2339,50 +2467,35 @@ fn focus_session(s: &Session, focused: bool) {
     if prev == focused || !s.focus_reporting.load(Ordering::Relaxed) {
         return;
     }
-    if let Ok(mut w) = s.writer.lock() {
-        let _ = w.write_all(if focused { b"\x1b[I" } else { b"\x1b[O" });
-        let _ = w.flush();
-    }
+    host_handle().write(&s.tile_id, if focused { b"\x1b[I" } else { b"\x1b[O" });
 }
 
 fn kill_session(s: &Arc<Session>) {
     let s = s.clone();
     std::thread::spawn(move || {
-        let pid = s.child.lock().ok().and_then(|c| c.process_id());
+        let pid = s.pid;
         #[cfg(windows)]
         {
-            if let Some(pid) = pid {
-                let _ = hidden_command("taskkill.exe")
-                    .args(["/PID", &pid.to_string(), "/T", "/F"])
-                    .status();
-            }
+            let _ = hidden_command("taskkill.exe")
+                .args(["/PID", &pid.to_string(), "/T", "/F"])
+                .status();
         }
         #[cfg(unix)]
         {
-            if let Some(pid) = pid {
-                unsafe {
-                    libc::killpg(pid as i32, libc::SIGTERM);
-                }
-                std::thread::sleep(Duration::from_millis(150));
-                unsafe {
-                    libc::killpg(pid as i32, libc::SIGKILL);
-                }
+            unsafe {
+                libc::killpg(pid as i32, libc::SIGTERM);
+            }
+            std::thread::sleep(Duration::from_millis(150));
+            unsafe {
+                libc::killpg(pid as i32, libc::SIGKILL);
             }
         }
-        if let Ok(mut c) = s.child.lock() {
-            let _ = c.kill();
-        }
-        s.exited.store(true, Ordering::Relaxed);
-        flush_session(&s);
-        sessions().lock().unwrap().remove(&s.tile_id);
+        host_handle().kill(&s.tile_id);
     });
 }
 
 fn run_stop(s: &Arc<Session>) {
-    if let Ok(mut w) = s.writer.lock() {
-        let _ = w.write_all(b"\x03");
-        let _ = w.flush();
-    }
+    host_handle().write(&s.tile_id, b"\x03");
     let s = s.clone();
     std::thread::spawn(move || {
         for _ in 0..30 {
@@ -2414,11 +2527,10 @@ fn run_status_json(target: Option<Arc<Session>>) -> String {
         })
         .to_string()
     } else {
-        let pid = s.child.lock().ok().and_then(|c| c.process_id());
         serde_json::json!({
             "state": "running",
             "cmd": run.cmd,
-            "pid": pid,
+            "pid": s.pid,
             "totalLines": total,
             "sessionId": s.tile_id,
         })
@@ -2584,23 +2696,17 @@ fn send_to_session(s: &Arc<Session>, text: &str) {
         .lock()
         .map(|p| p.screen().bracketed_paste())
         .unwrap_or(false);
-    if let Ok(mut w) = s.writer.lock() {
-        let _ = if bracketed {
-            w.write_all(format!("\x1b[200~{msg}\x1b[201~").as_bytes())
-        } else {
-            w.write_all(msg.as_bytes())
-        };
-        let _ = w.flush();
+    if bracketed {
+        host_handle().write(&s.tile_id, format!("\x1b[200~{msg}\x1b[201~").as_bytes());
+    } else {
+        host_handle().write(&s.tile_id, msg.as_bytes());
     }
     s.scrollback.store(0, Ordering::Relaxed);
     s.dirty.store(true, Ordering::Relaxed);
     let s = s.clone();
     tokio::spawn(async move {
         tokio::time::sleep(Duration::from_millis(150)).await;
-        if let Ok(mut w) = s.writer.lock() {
-            let _ = w.write_all(b"\r");
-            let _ = w.flush();
-        }
+        host_handle().write(&s.tile_id, b"\r");
         s.dirty.store(true, Ordering::Relaxed);
     });
 }
@@ -2620,10 +2726,7 @@ fn handle_client_msg(s: &Arc<Session>, text: &str) {
                     let mut cmd = s.cmd.lock().unwrap_or_else(|e| e.into_inner());
                     *cmd = line.map(|l| (Instant::now(), l));
                 }
-                if let Ok(mut w) = s.writer.lock() {
-                    let _ = w.write_all(d.as_bytes());
-                    let _ = w.flush();
-                }
+                host_handle().write(&s.tile_id, d.as_bytes());
             }
         }
         Some("scroll") => {
@@ -2776,10 +2879,7 @@ async fn handle_ws(ws: WebSocketStream<TcpStream>, params: Params) {
                 match msg {
                     Some(Ok(Message::Text(t))) => handle_client_msg(&session, &t),
                     Some(Ok(Message::Binary(b))) => {
-                        if let Ok(mut w) = session.writer.lock() {
-                            let _ = w.write_all(&b);
-                            let _ = w.flush();
-                        }
+                        host_handle().write(&session.tile_id, &b);
                     }
                     Some(Ok(Message::Close(_))) | None => break,
                     Some(Err(_)) => break,
@@ -2935,10 +3035,7 @@ async fn handle_conn(mut stream: TcpStream) {
         let tid = q.get("tileId").cloned().unwrap_or_default();
         let lines = q.get("lines").and_then(|l| l.parse().ok()).unwrap_or(1000usize);
         let (raw, cols) = match sessions().lock().unwrap().get(&tid).cloned() {
-            Some(s) => (
-                s.raw.lock().map(|r| r.snapshot()).unwrap_or_default(),
-                s.cols.load(Ordering::Relaxed),
-            ),
+            Some(s) => (host_handle().snapshot(&tid), s.cols.load(Ordering::Relaxed)),
             None => (load_buffer(&tid), 80),
         };
         let text = capture_text(&raw, cols, lines);
@@ -2989,10 +3086,10 @@ async fn handle_conn(mut stream: TcpStream) {
         let s = sessions().lock().unwrap().get(&tid).cloned();
         let name = match s {
             Some(s) => {
-                let pid = s.child.lock().ok().and_then(|c| c.process_id());
+                let pid = s.pid;
                 let shell = s.shell.clone();
                 tokio::task::spawn_blocking(move || {
-                    pid.and_then(foreground_command)
+                    foreground_command(pid)
                         .unwrap_or_else(|| display_command_name(&shell))
                 })
                 .await

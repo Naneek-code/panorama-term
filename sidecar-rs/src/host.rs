@@ -4,7 +4,9 @@ use std::io::Write;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::mpsc::{channel, Receiver, Sender};
 use std::sync::{Arc, Mutex};
+use std::time::Duration;
 
+use base64::Engine as _;
 use portable_pty::{native_pty_system, CommandBuilder, PtySize};
 
 use crate::RawRing;
@@ -99,24 +101,30 @@ struct SessionState {
     subs: Vec<SubEntry>,
 }
 
-struct HostSession {
+pub(crate) struct HostSession {
     key: String,
     pid: u32,
     alive: Arc<AtomicBool>,
     writer: Mutex<Box<dyn Write + Send>>,
     master: Mutex<Box<dyn portable_pty::MasterPty + Send>>,
-    _child: Mutex<Box<dyn portable_pty::Child + Send + Sync>>,
+    child: Arc<Mutex<Box<dyn portable_pty::Child + Send + Sync>>>,
     state: Arc<Mutex<SessionState>>,
 }
 
 // ---- Host ----
 
-struct HostInner {
-    sessions: Mutex<HashMap<String, Arc<HostSession>>>,
+pub(crate) struct HostInner {
+    pub(crate) sessions: Mutex<HashMap<String, Arc<HostSession>>>,
 }
 
 pub struct Host {
-    inner: Arc<HostInner>,
+    pub(crate) inner: Arc<HostInner>,
+}
+
+impl Clone for Host {
+    fn clone(&self) -> Self {
+        Host { inner: self.inner.clone() }
+    }
 }
 
 impl Host {
@@ -128,14 +136,20 @@ impl Host {
         }
     }
 
-    pub fn start(
-        self,
-        inbound: Receiver<Vec<u8>>,
-        outbound: Sender<Vec<u8>>,
-    ) -> std::thread::JoinHandle<()> {
-        let inner = self.inner;
+    pub fn start(&self, inbound: Receiver<Vec<u8>>, outbound: Sender<Vec<u8>>) -> std::thread::JoinHandle<()> {
+        let inner = self.inner.clone();
         std::thread::spawn(move || run_dispatch(inner, inbound, outbound))
     }
+
+    pub fn snapshot(&self, key: &str) -> Vec<u8> {
+        let sess = self.inner.sessions.lock().unwrap_or_else(|e| e.into_inner());
+        if let Some(s) = sess.get(key) {
+            s.state.lock().unwrap_or_else(|e| e.into_inner()).ring.snapshot()
+        } else {
+            Vec::new()
+        }
+    }
+
 }
 
 fn run_dispatch(inner: Arc<HostInner>, inbound: Receiver<Vec<u8>>, outbound: Sender<Vec<u8>>) {
@@ -202,16 +216,36 @@ fn dispatch_rpc(
             let cwd = v["cwd"].as_str().map(|s| s.to_string());
             let cols = v["cols"].as_u64().unwrap_or(80) as u16;
             let rows = v["rows"].as_u64().unwrap_or(24) as u16;
-            let shell = v["shell"].as_str().map(|s| s.to_string());
-            let spawn_cmd = v["spawn_cmd"].as_str().map(|s| s.to_string());
+            let exe = v["exe"].as_str().ok_or("missing exe")?.to_string();
+            let args: Vec<String> = v["args"]
+                .as_array()
+                .map(|a| a.iter().filter_map(|x| x.as_str().map(|s| s.to_string())).collect())
+                .unwrap_or_default();
+            let env: Vec<(String, String)> = v["env"]
+                .as_array()
+                .map(|a| {
+                    a.iter()
+                        .filter_map(|pair| {
+                            let k = pair.get(0)?.as_str()?;
+                            let val = pair.get(1)?.as_str()?;
+                            Some((k.to_string(), val.to_string()))
+                        })
+                        .collect()
+                })
+                .unwrap_or_default();
+            let seed = base64::engine::general_purpose::STANDARD
+                .decode(v["seed"].as_str().unwrap_or(""))
+                .unwrap_or_default();
             let pid = host_spawn(
                 inner,
                 key,
                 cwd,
                 cols.max(2),
                 rows.max(2),
-                shell,
-                spawn_cmd,
+                exe,
+                args,
+                env,
+                seed,
                 outbound.clone(),
             )?;
             Ok(serde_json::json!({ "pid": pid }))
@@ -255,17 +289,9 @@ fn dispatch_rpc(
         "kill" => {
             let key = v["key"].as_str().ok_or("missing key")?;
             let sess = inner.sessions.lock().unwrap_or_else(|e| e.into_inner());
-            let s = sess.get(key).ok_or("session not found")?;
-            let _ = s
-                .master
-                .lock()
-                .unwrap_or_else(|e| e.into_inner())
-                .resize(PtySize {
-                    rows: 1,
-                    cols: 1,
-                    pixel_width: 0,
-                    pixel_height: 0,
-                });
+            let s = sess.get(key).ok_or("session not found")?.clone();
+            drop(sess);
+            let _ = s.child.lock().unwrap_or_else(|e| e.into_inner()).kill();
             Ok(serde_json::json!({}))
         }
         "list" => {
@@ -299,22 +325,16 @@ fn host_spawn(
     cwd: Option<String>,
     cols: u16,
     rows: u16,
-    shell: Option<String>,
-    spawn_cmd: Option<String>,
+    exe: String,
+    args: Vec<String>,
+    env: Vec<(String, String)>,
+    seed: Vec<u8>,
     outbound: Sender<Vec<u8>>,
 ) -> Result<u32, String> {
     let cwd = cwd
         .or_else(|| std::env::var("USERPROFILE").ok())
         .or_else(|| std::env::var("HOME").ok())
         .unwrap_or_else(|| ".".into());
-
-    let shell = shell.unwrap_or_else(|| {
-        if cfg!(windows) {
-            std::env::var("COMSPEC").unwrap_or_else(|_| "powershell.exe".into())
-        } else {
-            std::env::var("SHELL").unwrap_or_else(|_| "/bin/bash".into())
-        }
-    });
 
     let pty_system = native_pty_system();
     let pair = pty_system
@@ -326,30 +346,19 @@ fn host_spawn(
         })
         .map_err(|e| format!("openpty: {e}"))?;
 
-    let mut cmd = if let Some(ref run_cmd) = spawn_cmd {
-        if cfg!(windows) {
-            let mut c = CommandBuilder::new("powershell.exe");
-            c.arg("-NoLogo");
-            c.arg("-Command");
-            c.arg(run_cmd);
-            c
-        } else {
-            let mut c = CommandBuilder::new("/bin/sh");
-            c.arg("-lc");
-            c.arg(run_cmd);
-            c
-        }
-    } else {
-        CommandBuilder::new(&shell)
-    };
+    let mut cmd = CommandBuilder::new(&exe);
+    for arg in &args {
+        cmd.arg(arg);
+    }
+    for (k, val) in &env {
+        cmd.env(k, val);
+    }
     cmd.cwd(&cwd);
-    cmd.env("TERM", "xterm-256color");
-    cmd.env("PANORAMA_TERMINAL", "1");
 
     let child = pair
         .slave
         .spawn_command(cmd)
-        .map_err(|e| format!("spawn: {e}"))?;
+        .map_err(|e| format!("spawn '{exe}': {e}"))?;
     let reader = pair
         .master
         .try_clone_reader()
@@ -363,9 +372,10 @@ fn host_spawn(
 
     let alive = Arc::new(AtomicBool::new(true));
     let state = Arc::new(Mutex::new(SessionState {
-        ring: RawRing::new(Vec::new()),
+        ring: RawRing::new(seed),
         subs: Vec::new(),
     }));
+    let child_arc = Arc::new(Mutex::new(child));
 
     let session = Arc::new(HostSession {
         key: key.clone(),
@@ -373,7 +383,7 @@ fn host_spawn(
         alive: alive.clone(),
         writer: Mutex::new(writer),
         master: Mutex::new(pair.master),
-        _child: Mutex::new(child),
+        child: child_arc.clone(),
         state: state.clone(),
     });
 
@@ -383,9 +393,15 @@ fn host_spawn(
         .unwrap_or_else(|e| e.into_inner())
         .insert(key.clone(), session);
 
+    let exit_once = Arc::new(AtomicBool::new(false));
+
     {
         let state = state.clone();
         let alive = alive.clone();
+        let child_arc = child_arc.clone();
+        let exit_once = exit_once.clone();
+        let outbound = outbound.clone();
+        let key = key.clone();
         std::thread::spawn(move || {
             let mut reader = reader;
             let mut buf = [0u8; 4096];
@@ -397,8 +413,7 @@ fn host_spawn(
                         let mut st = state.lock().unwrap_or_else(|e| e.into_inner());
                         let pre = st.ring.len_total();
                         st.ring.push(chunk);
-                        let frame =
-                            encode(KIND_DATA, &encode_data_payload(&key, pre, chunk));
+                        let frame = encode(KIND_DATA, &encode_data_payload(&key, pre, chunk));
                         st.subs.retain(|sub| {
                             if pre >= sub.min_offset {
                                 sub.tx.send(frame.clone()).is_ok()
@@ -409,19 +424,57 @@ fn host_spawn(
                     }
                 }
             }
-            alive.store(false, Ordering::Relaxed);
-            state
-                .lock()
-                .unwrap_or_else(|e| e.into_inner())
-                .subs
-                .clear();
-            let event =
-                serde_json::json!({ "kind": "exit", "key": key }).to_string();
-            let _ = outbound.send(encode(KIND_EVENT, event.as_bytes()));
+            emit_session_exit(&exit_once, &alive, &state, &child_arc, &key, &outbound);
+        });
+    }
+
+    {
+        let state = state.clone();
+        let alive = alive.clone();
+        let child_arc = child_arc.clone();
+        std::thread::spawn(move || loop {
+            std::thread::sleep(Duration::from_millis(300));
+            if exit_once.load(Ordering::Relaxed) {
+                return;
+            }
+            let done = {
+                let mut c = child_arc.lock().unwrap_or_else(|e| e.into_inner());
+                c.try_wait().ok().flatten().is_some()
+            };
+            if done {
+                emit_session_exit(&exit_once, &alive, &state, &child_arc, &key, &outbound);
+                return;
+            }
         });
     }
 
     Ok(pid)
+}
+
+fn emit_session_exit(
+    exit_once: &AtomicBool,
+    alive: &AtomicBool,
+    state: &Mutex<SessionState>,
+    child: &Mutex<Box<dyn portable_pty::Child + Send + Sync>>,
+    key: &str,
+    outbound: &Sender<Vec<u8>>,
+) {
+    if exit_once.swap(true, Ordering::SeqCst) {
+        return;
+    }
+    alive.store(false, Ordering::Relaxed);
+    state.lock().unwrap_or_else(|e| e.into_inner()).subs.clear();
+    let code: Option<u32> = {
+        let mut c = child.lock().unwrap_or_else(|e| e.into_inner());
+        (0..10).find_map(|i| {
+            if i > 0 {
+                std::thread::sleep(Duration::from_millis(50));
+            }
+            c.try_wait().ok().flatten().map(|st| st.exit_code())
+        })
+    };
+    let event = serde_json::json!({ "kind": "exit", "key": key, "code": code }).to_string();
+    let _ = outbound.send(encode(KIND_EVENT, event.as_bytes()));
 }
 
 fn host_subscribe(
@@ -524,6 +577,22 @@ mod tests {
         }
     }
 
+    fn make_spawn_rpc(key: &str, exe: &str, args: &[&str], id: u64) -> Vec<u8> {
+        let rpc = serde_json::json!({
+            "id": id,
+            "op": "spawn",
+            "key": key,
+            "cwd": std::env::temp_dir().to_string_lossy(),
+            "cols": 80u64,
+            "rows": 24u64,
+            "exe": exe,
+            "args": args,
+            "env": [["TERM", "xterm-256color"]],
+            "seed": "",
+        });
+        encode(KIND_RPC, rpc.to_string().as_bytes())
+    }
+
     #[test]
     fn host_pty_smoke() {
         let (in_tx, in_rx) = channel::<Vec<u8>>();
@@ -532,20 +601,14 @@ mod tests {
         let host = Host::new();
         let _handle = host.start(in_rx, out_tx);
 
-        let spawn_cmd = if cfg!(windows) {
-            "cmd /c echo panorama-marker"
+        let (exe, args): (&str, &[&str]) = if cfg!(windows) {
+            ("cmd.exe", &["/c", "echo panorama-marker"])
         } else {
-            "echo panorama-marker"
+            ("/bin/sh", &["-c", "echo panorama-marker"])
         };
 
-        let spawn_rpc = serde_json::json!({
-            "id": 1u64, "op": "spawn", "key": "smoke",
-            "cwd": std::env::temp_dir().to_string_lossy(),
-            "cols": 80u64, "rows": 24u64, "spawn_cmd": spawn_cmd,
-        });
-        in_tx.send(encode(KIND_RPC, spawn_rpc.to_string().as_bytes())).unwrap();
+        in_tx.send(make_spawn_rpc("smoke", exe, args, 1)).unwrap();
 
-        // Single collection loop - never discard frames; send subscribe reactively.
         let test_deadline = Instant::now() + Duration::from_secs(20);
         let mut spawn_ok = false;
         let mut sub_sent = false;
@@ -581,10 +644,14 @@ mod tests {
                         assert!(v["ok"].as_bool().unwrap_or(false), "spawn failed: {v}");
                         spawn_ok = true;
                         let sub_rpc = serde_json::json!({
-                            "id": 2u64, "op": "subscribe",
-                            "key": "smoke", "from_offset": 0u64,
+                            "id": 2u64,
+                            "op": "subscribe",
+                            "key": "smoke",
+                            "from_offset": 0u64,
                         });
-                        in_tx.send(encode(KIND_RPC, sub_rpc.to_string().as_bytes())).unwrap();
+                        in_tx
+                            .send(encode(KIND_RPC, sub_rpc.to_string().as_bytes()))
+                            .unwrap();
                         sub_sent = true;
                     } else if id == 2 && sub_sent && !sub_replied {
                         assert!(v["ok"].as_bool().unwrap_or(false), "subscribe failed: {v}");
@@ -626,9 +693,10 @@ mod tests {
             String::from_utf8_lossy(&all_data)
         );
 
-        // Get total via list (handles any stray DATA/EVENT frames still in queue)
         let list_rpc = serde_json::json!({ "id": 3u64, "op": "list" });
-        in_tx.send(encode(KIND_RPC, list_rpc.to_string().as_bytes())).unwrap();
+        in_tx
+            .send(encode(KIND_RPC, list_rpc.to_string().as_bytes()))
+            .unwrap();
 
         let list_deadline = Instant::now() + Duration::from_secs(5);
         let mut total: Option<u64> = None;
@@ -651,13 +719,16 @@ mod tests {
         let total = total.expect("session total not found via list");
         assert!(total > 0, "total bytes must be > 0");
 
-        // Second subscribe from total/2 - verify offset semantics
         let half = total / 2;
         let sub2_rpc = serde_json::json!({
-            "id": 4u64, "op": "subscribe",
-            "key": "smoke", "from_offset": half,
+            "id": 4u64,
+            "op": "subscribe",
+            "key": "smoke",
+            "from_offset": half,
         });
-        in_tx.send(encode(KIND_RPC, sub2_rpc.to_string().as_bytes())).unwrap();
+        in_tx
+            .send(encode(KIND_RPC, sub2_rpc.to_string().as_bytes()))
+            .unwrap();
 
         let sub2_deadline = Instant::now() + Duration::from_secs(5);
         let mut replay_start: Option<u64> = None;
@@ -710,7 +781,6 @@ mod tests {
         let rs = replay_start.unwrap_or(total);
         assert!(rs >= half, "replay start {rs} < from_offset {half}");
 
-        // Replay tail must equal original data from rs onwards
         let skip = rs as usize;
         if skip <= all_data.len() {
             assert_eq!(
