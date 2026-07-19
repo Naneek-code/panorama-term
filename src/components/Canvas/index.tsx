@@ -8,6 +8,7 @@ import { readClipboard, writeClipboard } from '~/adapter/clipboard/clipboard.cli
 import Frame from '~/components/Canvas/Frame';
 import FrameBar from '~/components/Canvas/FrameBar';
 import Minimap from '~/components/Canvas/Minimap';
+import Palette from '~/components/Canvas/Palette';
 import TileFrame from '~/components/Canvas/TileFrame';
 import Navigator from '~/components/Canvas/Navigator';
 import DiffViewer from '~/components/DiffViewer';
@@ -109,6 +110,9 @@ const Canvas = () => {
   const [fsId, setFsId] = React.useState<string | null>(null);
   const [fsExit, setFsExit] = React.useState(false);
   const [navOpen, setNavOpen] = React.useState(() => localStorage.getItem('panorama:navOpen') === '1');
+  const [paletteOpen, setPaletteOpen] = React.useState(false);
+  const paletteRef = React.useRef(paletteOpen);
+  paletteRef.current = paletteOpen;
   React.useEffect(() => {
     localStorage.setItem('panorama:navOpen', navOpen ? '1' : '0');
   }, [navOpen]);
@@ -251,18 +255,50 @@ const Canvas = () => {
         setNavOpen((v) => !v);
         return true;
       }
+      if (cmd === 'view.palette') {
+        setPaletteOpen((v) => !v);
+        return true;
+      }
       return false;
     };
+    let armedAt = 0;
+    let cleanHold = false;
     const onKey = (e: KeyboardEvent) => {
       if (isCapturing()) return;
+      if (e.key === 'Shift') {
+        if (e.repeat || e.ctrlKey || e.altKey || e.metaKey) return;
+        if (getBinding('view.palette') !== 'shift shift') return;
+        if (performance.now() - armedAt < 350) {
+          armedAt = 0;
+          cleanHold = false;
+          setPaletteOpen((v) => !v);
+          e.preventDefault();
+          e.stopPropagation();
+          return;
+        }
+        cleanHold = true;
+        return;
+      }
+      armedAt = 0;
+      cleanHold = false;
       const cmd = matchCommand(e);
       if (!cmd) return;
+      if (paletteRef.current && cmd !== 'view.palette') return;
       if (!run(cmd)) return;
       e.preventDefault();
       e.stopPropagation();
     };
+    const onKeyUp = (e: KeyboardEvent) => {
+      if (e.key !== 'Shift' || !cleanHold) return;
+      cleanHold = false;
+      armedAt = performance.now();
+    };
     window.addEventListener('keydown', onKey, true);
-    return () => window.removeEventListener('keydown', onKey, true);
+    window.addEventListener('keyup', onKeyUp, true);
+    return () => {
+      window.removeEventListener('keydown', onKey, true);
+      window.removeEventListener('keyup', onKeyUp, true);
+    };
   }, [toggleFs, addTile, addNote, closeTile, reopenTile, resetZoom, focusTile]);
 
   React.useEffect(() => {
@@ -495,6 +531,16 @@ const Canvas = () => {
   const hideNav = () => setNavOpen(false);
   const showNav = () => setNavOpen(true);
 
+  const closePalette = React.useCallback(() => setPaletteOpen(false), []);
+
+  const paletteSelect = React.useCallback(
+    (id: string) => {
+      if (fsIdRef.current && fsIdRef.current !== id) exitFs();
+      navFocus(id, true);
+    },
+    [exitFs, navFocus]
+  );
+
   const openDiff = (root: string, file: string) => {
     clearTimeout(diffTimer.current);
     setDiffExit(false);
@@ -700,6 +746,7 @@ const Canvas = () => {
         </div>
         {!fsId && <Minimap view={view} tiles={tiles} viewportRef={bgRef} onPan={panTo} />}
       </div>
+      {paletteOpen && <Palette tiles={tiles} onSelect={paletteSelect} onClose={closePalette} />}
       {!fsId && navOpen && (
         <Navigator
           tiles={tiles}

@@ -9,6 +9,7 @@ export type CommandId =
   | 'tile.focus'
   | 'view.resetZoom'
   | 'view.navigator'
+  | 'view.palette'
   | 'diff.close'
   | 'diff.prevChunk'
   | 'diff.nextChunk'
@@ -35,6 +36,7 @@ export const KEYBINDINGS: Command[] = [
   { id: 'tile.focus', label: 'Focus active tile', group: 'Canvas', defaultCombo: 'alt+f' },
   { id: 'view.resetZoom', label: 'Reset zoom', group: 'View', defaultCombo: 'mod+0' },
   { id: 'view.navigator', label: 'Toggle navigator', group: 'View', defaultCombo: 'mod+b' },
+  { id: 'view.palette', label: 'Go to tile', group: 'View', defaultCombo: 'shift shift' },
   { id: 'diff.close', label: 'Close viewer', group: 'Diff viewer', defaultCombo: 'escape' },
   { id: 'diff.prevChunk', label: 'Previous difference', group: 'Diff viewer', defaultCombo: 'alt+arrowup' },
   { id: 'diff.nextChunk', label: 'Next difference', group: 'Diff viewer', defaultCombo: 'alt+arrowdown' },
@@ -103,6 +105,7 @@ export const setCapturing = (value: boolean): void => {
 export const isCapturing = (): boolean => capturing;
 
 const TOKENS: Record<string, string> = {
+  'shift shift': 'Double Shift',
   mod: IS_MAC ? 'Cmd' : 'Ctrl',
   alt: IS_MAC ? 'Option' : 'Alt',
   shift: 'Shift',
