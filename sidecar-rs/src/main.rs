@@ -116,6 +116,18 @@ impl HostHandle {
         let _ = self.tx.send(frame);
     }
 
+    fn session_info(&self, key: &str) -> Option<(bool, u16)> {
+        let reply = self.rpc_raw(serde_json::json!({ "op": "list" })).ok()?;
+        let found = reply["sessions"]
+            .as_array()?
+            .iter()
+            .find(|s| s["key"].as_str() == Some(key))?;
+        Some((
+            found["alive"].as_bool().unwrap_or(false),
+            found["cols"].as_u64().unwrap_or(80) as u16,
+        ))
+    }
+
     fn snapshot(&self, key: &str) -> Vec<u8> {
         let reply = match self.rpc_raw(serde_json::json!({"op": "snapshot", "key": key})) {
             Ok(r) => r,
@@ -2908,26 +2920,39 @@ fn current_command_line(s: &Arc<Session>) -> Option<String> {
     }
 }
 
-fn send_to_session(s: &Arc<Session>, text: &str) {
+fn send_to_tile(tile_id: &str, text: &str) -> Result<(), String> {
     let msg = text.trim_end_matches(['\r', '\n']).to_string();
-    let bracketed = s
-        .parser
-        .lock()
-        .map(|p| p.screen().bracketed_paste())
+    let session = sessions().lock().unwrap().get(tile_id).cloned();
+    let live = session.is_some()
+        || host_handle()
+            .session_info(tile_id)
+            .map(|(alive, _)| alive)
+            .unwrap_or(false);
+    if !live {
+        return Err("no session for tile".into());
+    }
+    let bracketed = session
+        .as_ref()
+        .and_then(|s| s.parser.lock().ok().map(|p| p.screen().bracketed_paste()))
         .unwrap_or(false);
     if bracketed {
-        host_handle().write(&s.tile_id, format!("\x1b[200~{msg}\x1b[201~").as_bytes());
+        host_handle().write(tile_id, format!("\x1b[200~{msg}\x1b[201~").as_bytes());
     } else {
-        host_handle().write(&s.tile_id, msg.as_bytes());
+        host_handle().write(tile_id, msg.as_bytes());
     }
-    s.scrollback.store(0, Ordering::Relaxed);
-    s.dirty.store(true, Ordering::Relaxed);
-    let s = s.clone();
+    if let Some(s) = &session {
+        s.scrollback.store(0, Ordering::Relaxed);
+        s.dirty.store(true, Ordering::Relaxed);
+    }
+    let tile_id = tile_id.to_string();
     tokio::spawn(async move {
         tokio::time::sleep(Duration::from_millis(150)).await;
-        host_handle().write(&s.tile_id, b"\r");
-        s.dirty.store(true, Ordering::Relaxed);
+        host_handle().write(&tile_id, b"\r");
+        if let Some(s) = sessions().lock().unwrap().get(&tile_id) {
+            s.dirty.store(true, Ordering::Relaxed);
+        }
     });
+    Ok(())
 }
 
 fn handle_client_msg(s: &Arc<Session>, text: &str) {
@@ -3255,7 +3280,10 @@ async fn handle_conn(mut stream: TcpStream) {
         let lines = q.get("lines").and_then(|l| l.parse().ok()).unwrap_or(1000usize);
         let (raw, cols) = match sessions().lock().unwrap().get(&tid).cloned() {
             Some(s) => (host_handle().snapshot(&tid), s.cols.load(Ordering::Relaxed)),
-            None => (load_buffer(&tid), 80),
+            None => match host_handle().session_info(&tid) {
+                Some((true, cols)) => (host_handle().snapshot(&tid), cols),
+                _ => (load_buffer(&tid), 80),
+            },
         };
         let text = capture_text(&raw, cols, lines);
         let resp = format!(
@@ -3281,14 +3309,13 @@ async fn handle_conn(mut stream: TcpStream) {
                 text = String::from_utf8_lossy(&body).into_owned();
             }
         }
-        let s = sessions().lock().unwrap().get(&tid).cloned();
-        let body = match s {
-            Some(s) if !text.trim().is_empty() => {
-                send_to_session(&s, &text);
-                "{\"ok\":true}".to_string()
+        let body = if text.trim().is_empty() {
+            serde_json::json!({ "error": "empty message body" }).to_string()
+        } else {
+            match send_to_tile(&tid, &text) {
+                Ok(()) => "{\"ok\":true}".to_string(),
+                Err(e) => serde_json::json!({ "error": e }).to_string(),
             }
-            Some(_) => serde_json::json!({ "error": "empty message body" }).to_string(),
-            None => serde_json::json!({ "error": "no session for tile" }).to_string(),
         };
         let resp = format!(
             "HTTP/1.1 200 OK\r\nAccess-Control-Allow-Origin: *\r\nContent-Type: application/json\r\nContent-Length: {}\r\n\r\n{}",
