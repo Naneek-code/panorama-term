@@ -248,7 +248,10 @@ const GridTerminal = ({ tileId, sessionId, readOnly, cwd, cols, rows, active, vi
   onClaudeDiffRef.current = onClaudeDiff;
   onProgressRef.current = onProgress;
 
-  const focusTerminal = React.useCallback(() => textareaRef.current?.focus({ preventScroll: true }), []);
+  const focusTerminal = React.useCallback(() => {
+    const el = isLinux ? textareaRef.current : termRef.current;
+    el?.focus({ preventScroll: true });
+  }, []);
 
   const isWatching = React.useCallback((): boolean => {
     const rect = termRef.current?.getBoundingClientRect();
@@ -484,8 +487,8 @@ const GridTerminal = ({ tileId, sessionId, readOnly, cwd, cols, rows, active, vi
 
   React.useEffect(() => {
     dirtyRef.current = true;
-    if (active) focusTerminal();
-  }, [active, focusTerminal]);
+    if (active && readOnly) focusTerminal();
+  }, [active, readOnly, focusTerminal]);
 
   React.useEffect(() => {
     const update = () => {
@@ -827,11 +830,7 @@ const GridTerminal = ({ tileId, sessionId, readOnly, cwd, cols, rows, active, vi
         onFocus={onTermFocus}
         onPointerUp={onPointerUp}
         onPointerDown={(e) => {
-          if (isLinux) {
-            focusTerminal();
-          } else {
-            termRef.current?.focus({ preventScroll: true });
-          }
+          focusTerminal();
           onPointerDown(e);
         }}
         onPointerMove={onPointerMove}
