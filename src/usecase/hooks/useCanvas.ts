@@ -331,21 +331,26 @@ export const useCanvas = ({ seed, wsId, onPersist }: UseCanvasArgs) => {
     };
   }, []);
 
+  const bindKey = React.useCallback((id: string) => {
+    const tile = tilesRef.current.find((t) => t.id === id);
+    return tile?.ptySessionId ?? id;
+  }, []);
+
   const linkNoteTo = React.useCallback((noteId: string, termId: string) => {
     const note = tilesRef.current.find((t) => t.id === noteId);
     if (!note || !wsIdRef.current) return;
     setTiles((prev) =>
       prev.map((t) => (t.id === noteId ? { ...t, linkedTo: [...new Set([...(t.linkedTo ?? []), termId])] } : t))
     );
-    void linkNote(wsIdRef.current, noteId, termId, noteLinkTitle(note)).catch(() => {});
-  }, []);
+    void linkNote(wsIdRef.current, noteId, bindKey(termId), noteLinkTitle(note)).catch(() => {});
+  }, [bindKey]);
 
   const unlinkNoteFrom = React.useCallback((noteId: string, termId: string) => {
     setTiles((prev) =>
       prev.map((t) => (t.id === noteId ? { ...t, linkedTo: (t.linkedTo ?? []).filter((id) => id !== termId) } : t))
     );
-    void unlinkNote(noteId, termId).catch(() => {});
-  }, []);
+    void unlinkNote(noteId, bindKey(termId)).catch(() => {});
+  }, [bindKey]);
 
   const linkTermTo = React.useCallback((termId: string, peerId: string) => {
     const a = tilesRef.current.find((t) => t.id === termId);
@@ -354,8 +359,8 @@ export const useCanvas = ({ seed, wsId, onPersist }: UseCanvasArgs) => {
     setTiles((prev) =>
       prev.map((t) => (t.id === termId ? { ...t, linkedTo: [...new Set([...(t.linkedTo ?? []), peerId])] } : t))
     );
-    void linkTerm(termId, termName(a), peerId, termName(b)).catch(() => {});
-  }, []);
+    void linkTerm(bindKey(termId), termName(a), bindKey(peerId), termName(b)).catch(() => {});
+  }, [bindKey]);
 
   const unlinkTermFrom = React.useCallback((termId: string, peerId: string) => {
     setTiles((prev) =>
@@ -365,8 +370,8 @@ export const useCanvas = ({ seed, wsId, onPersist }: UseCanvasArgs) => {
           : t
       )
     );
-    void unlinkTerm(termId, peerId).catch(() => {});
-  }, []);
+    void unlinkTerm(bindKey(termId), bindKey(peerId)).catch(() => {});
+  }, [bindKey]);
 
   const closeTile = React.useCallback((id: string) => {
     const closing = tilesRef.current.find((t) => t.id === id);
@@ -375,15 +380,15 @@ export const useCanvas = ({ seed, wsId, onPersist }: UseCanvasArgs) => {
       saveClosed(ws, [...loadClosed(ws), closing]);
     }
     if (closing?.type === 'note') {
-      for (const termId of closing.linkedTo ?? []) void unlinkNote(id, termId).catch(() => {});
+      for (const termId of closing.linkedTo ?? []) void unlinkNote(id, bindKey(termId)).catch(() => {});
       if (wsIdRef.current) void deleteNote(wsIdRef.current, id).catch(() => {});
     }
     if (closing?.type === 'term') {
-      for (const peerId of closing.linkedTo ?? []) void unlinkTerm(id, peerId).catch(() => {});
+      for (const peerId of closing.linkedTo ?? []) void unlinkTerm(bindKey(id), bindKey(peerId)).catch(() => {});
       for (const t of tilesRef.current) {
         if (!(t.linkedTo ?? []).includes(id)) continue;
-        if (t.type === 'note') void unlinkNote(t.id, id).catch(() => {});
-        if (t.type === 'term') void unlinkTerm(t.id, id).catch(() => {});
+        if (t.type === 'note') void unlinkNote(t.id, bindKey(id)).catch(() => {});
+        if (t.type === 'term') void unlinkTerm(bindKey(t.id), bindKey(id)).catch(() => {});
       }
     }
     setTiles((prev) =>
@@ -393,7 +398,7 @@ export const useCanvas = ({ seed, wsId, onPersist }: UseCanvasArgs) => {
     );
     setActiveTile((a) => (a === id ? null : a));
     void killPtySession(id);
-  }, []);
+  }, [bindKey]);
 
   const reopenTile = React.useCallback(() => {
     const ws = wsIdRef.current;
