@@ -124,6 +124,7 @@ export const useCanvas = ({ seed, wsId, onPersist }: UseCanvasArgs) => {
   const panRef = React.useRef<PanOrigin | null>(null);
   const resizeRaw = React.useRef<{ id: string; x: number; y: number; width: number; height: number } | null>(null);
   const lastTermSize = React.useRef<{ width: number; height: number } | null>(null);
+  const mouseRef = React.useRef<{ x: number; y: number } | null>(null);
 
   React.useEffect(() => {
     const id = setTimeout(() => onPersist(toStored({ tiles, view, frames })), 400);
@@ -192,6 +193,17 @@ export const useCanvas = ({ seed, wsId, onPersist }: UseCanvasArgs) => {
     return () => bg.removeEventListener('scroll', onScroll);
   }, []);
 
+  React.useEffect(() => {
+    const onMove = (e: PointerEvent) => {
+      const rect = bgRef.current?.getBoundingClientRect();
+      if (!rect) return;
+      const v = viewRef.current;
+      mouseRef.current = { x: (e.clientX - rect.left - v.x) / v.k, y: (e.clientY - rect.top - v.y) / v.k };
+    };
+    window.addEventListener('pointermove', onMove);
+    return () => window.removeEventListener('pointermove', onMove);
+  }, []);
+
   React.useEffect(
     () => () => {
       cancelAnimationFrame(snapRaf.current);
@@ -202,10 +214,11 @@ export const useCanvas = ({ seed, wsId, onPersist }: UseCanvasArgs) => {
     []
   );
 
-  const addTile = React.useCallback((center?: { x: number; y: number }) => {
+  const addTile = React.useCallback((at?: { x: number; y: number }) => {
     setView((v) => {
-      const cx = center ? center.x : (window.innerWidth / 2 - v.x) / v.k;
-      const cy = center ? center.y : ((window.innerHeight - TOOLBAR_HEIGHT) / 2 - v.y) / v.k;
+      const p = at ?? mouseRef.current;
+      const cx = p ? p.x : (window.innerWidth / 2 - v.x) / v.k;
+      const cy = p ? p.y : ((window.innerHeight - TOOLBAR_HEIGHT) / 2 - v.y) / v.k;
       setTiles((prev) => {
         const last = lastTermSize.current ?? [...prev].reverse().find((t) => t.type === 'term');
         const width = last?.width ?? TILE_WIDTH;
@@ -215,8 +228,8 @@ export const useCanvas = ({ seed, wsId, onPersist }: UseCanvasArgs) => {
           {
             id: createId(),
             type: 'term',
-            x: cx - width / 2,
-            y: cy - height / 2,
+            x: cx,
+            y: cy,
             width,
             height,
             zIndex: prev.reduce((m, t) => Math.max(m, t.zIndex), 0) + 1
