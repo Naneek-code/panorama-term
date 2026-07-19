@@ -239,21 +239,24 @@ fn bridge_connection(host: Host, stream: TcpStream) {
 }
 
 fn run_dispatch(inner: Arc<HostInner>, inbound: Receiver<Vec<u8>>, outbound: Sender<Vec<u8>>) {
-    let my_gen = inner.brain_gen.fetch_add(1, Ordering::SeqCst) + 1;
-    *inner.brain_out.lock().unwrap_or_else(|e| e.into_inner()) = Some(outbound.clone());
+    let mut my_gen = 0u64;
     let mut pending: Vec<u8> = Vec::new();
     loop {
         let bytes = match inbound.recv() {
             Ok(b) => b,
             Err(_) => break,
         };
+        if my_gen == 0 {
+            my_gen = inner.brain_gen.fetch_add(1, Ordering::SeqCst) + 1;
+            *inner.brain_out.lock().unwrap_or_else(|e| e.into_inner()) = Some(outbound.clone());
+        }
         pending.extend_from_slice(&bytes);
         while let Some((kind, payload, consumed)) = decode(&pending) {
             pending.drain(0..consumed);
             handle_frame(&inner, kind, &payload, &outbound);
         }
     }
-    if inner.brain_gen.load(Ordering::SeqCst) == my_gen {
+    if my_gen != 0 && inner.brain_gen.load(Ordering::SeqCst) == my_gen {
         *inner.brain_out.lock().unwrap_or_else(|e| e.into_inner()) = None;
     }
 }

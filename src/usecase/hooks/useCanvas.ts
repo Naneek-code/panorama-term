@@ -242,7 +242,7 @@ export const useCanvas = ({ seed, wsId, onPersist }: UseCanvasArgs) => {
 
   const addRunView = React.useCallback((srcId: string, cwd: string, sessionId: string, cmd: string) => {
     setTiles((prev) => {
-      const existing = prev.find((t) => t.runCwd === cwd);
+      const existing = prev.find((t) => t.runCwd && t.ptySessionId === sessionId);
       if (existing) {
         setActiveTile(existing.id);
         return prev;

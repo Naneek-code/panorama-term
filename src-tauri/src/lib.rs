@@ -384,8 +384,9 @@ fn run_watch_manifests(app: tauri::AppHandle, path: String) -> Result<u32, Strin
             return;
         }
         let relevant = event.paths.iter().any(|p| {
-            p.file_name()
-                .is_some_and(|n| n == "package.json" || n == "Cargo.toml")
+            p.file_name().and_then(|n| n.to_str()).is_some_and(|n| {
+                n == "package.json" || n == "Cargo.toml" || n.ends_with(".sln") || n.ends_with(".csproj")
+            })
         });
         if relevant {
             let _ = app.emit("run:manifests", serde_json::json!({ "path": root }));
@@ -422,7 +423,87 @@ fn run_commands(path: String) -> Vec<String> {
         out.push("cargo run".into());
         out.push("cargo build".into());
     }
+    dotnet_commands(dir, &mut out);
     out
+}
+
+fn xml_tag(src: &str, tag: &str) -> Option<String> {
+    let open = format!("<{tag}>");
+    let close = format!("</{tag}>");
+    let s = src.find(&open)? + open.len();
+    let e = src[s..].find(&close)? + s;
+    let v = src[s..e].trim();
+    (!v.is_empty()).then(|| v.to_string())
+}
+
+fn msbuild_env(s: &str) -> String {
+    let mut out = String::new();
+    let mut rest = s;
+    while let Some(i) = rest.find("$(") {
+        out.push_str(&rest[..i]);
+        match rest[i..].find(')') {
+            Some(j) => {
+                out.push_str("$env:");
+                out.push_str(&rest[i + 2..i + j]);
+                rest = &rest[i + j + 1..];
+            }
+            None => {
+                out.push_str(&rest[i..]);
+                rest = "";
+            }
+        }
+    }
+    out.push_str(rest);
+    out
+}
+
+fn dotnet_commands(dir: &std::path::Path, out: &mut Vec<String>) {
+    let mut csprojs: Vec<PathBuf> = Vec::new();
+    let mut has_sln = false;
+    let Ok(rd) = std::fs::read_dir(dir) else { return };
+    for e in rd.flatten() {
+        let p = e.path();
+        match p.extension().and_then(|x| x.to_str()) {
+            Some("sln") => {
+                has_sln = true;
+                if let Ok(s) = std::fs::read_to_string(&p) {
+                    for line in s.lines().filter(|l| l.starts_with("Project(")) {
+                        if let Some(rel) = line.split('"').find(|seg| seg.ends_with(".csproj")) {
+                            csprojs.push(dir.join(rel));
+                        }
+                    }
+                }
+            }
+            Some("csproj") => csprojs.push(p),
+            _ => {}
+        }
+    }
+    if !has_sln && csprojs.is_empty() {
+        return;
+    }
+    out.push("dotnet build".into());
+    csprojs.sort();
+    csprojs.dedup();
+    for p in csprojs {
+        let Ok(src) = std::fs::read_to_string(&p) else { continue };
+        if let Some(prog) = xml_tag(&src, "StartProgram") {
+            let prog = msbuild_env(&prog);
+            let args = xml_tag(&src, "StartArguments").unwrap_or_default();
+            let launch = format!("& \"{prog}\" {args}").trim_end().to_string();
+            out.push(match xml_tag(&src, "StartWorkingDirectory").map(|w| msbuild_env(&w)) {
+                Some(wd) => format!("Set-Location \"{wd}\"; {launch}"),
+                None => launch,
+            });
+        } else if src.contains("<Project Sdk=")
+            && xml_tag(&src, "OutputType").is_some_and(|t| t.eq_ignore_ascii_case("exe"))
+        {
+            let rel = p.strip_prefix(dir).ok().and_then(|r| r.to_str().map(String::from));
+            out.push(match rel {
+                Some(r) if r.contains(['/', '\\']) => format!("dotnet run --project {r}"),
+                _ => "dotnet run".into(),
+            });
+        }
+    }
 }
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]

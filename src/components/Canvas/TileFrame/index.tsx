@@ -170,8 +170,9 @@ const TileFrame = ({ tile, view, active, selected, alert, visible, live, hidden,
   const code = tile.type === 'code';
   const runView = Boolean(tile.runCwd);
   const runCwd = tile.type === 'term' ? tile.runCwd ?? tile.cwd : undefined;
-  const runTile = tile.type === 'term' ? (runView ? tile.ptySessionId?.replace(/^run:/, '') : tile.id) : undefined;
-  const run = useRun(runCwd, runTile);
+  const runTile = tile.type === 'term' ? (runView ? tile.ptySessionId?.replace(/^(run|build):/, '') : tile.id) : undefined;
+  const viewKind = runView && tile.ptySessionId?.startsWith('build:') ? ('build' as const) : ('run' as const);
+  const run = useRun(runCwd, runTile, viewKind);
   const build = useRun(runView ? undefined : runCwd, runView ? undefined : tile.id, 'build');
   const running = run.status.state === 'running';
   const runFailed = run.status.state === 'exited' && (run.status.exitCode ?? 0) !== 0;
@@ -239,13 +240,27 @@ const TileFrame = ({ tile, view, active, selected, alert, visible, live, hidden,
     setBuildMenu(menuAtButton(e));
   };
 
+  const openBuildOutput = () => {
+    const sid = build.status.sessionId;
+    if (sid && tile.cwd) onOpenRunOutput(tile.id, tile.cwd, sid, build.status.cmd ?? build.defaultCmd ?? 'build');
+  };
+
   const buildMenuItems: ContextMenuEntry[] = building
-    ? [{ label: 'Stop build', icon: <X size={15} strokeWidth={1.75} />, danger: true, onSelect: () => build.stop(true) }]
-    : build.commands.map((cmd) => ({
-        label: cmd === build.defaultCmd ? `${cmd}  (default)` : cmd,
-        icon: <Hammer size={15} strokeWidth={1.75} />,
-        onSelect: () => build.start(cmd)
-      }));
+    ? [
+        { label: 'Open output', icon: <SquareTerminal size={15} strokeWidth={1.75} />, onSelect: openBuildOutput },
+        'separator',
+        { label: 'Stop build', icon: <X size={15} strokeWidth={1.75} />, danger: true, onSelect: () => build.stop(true) }
+      ]
+    : [
+        ...(build.status.sessionId
+          ? ([{ label: 'Open output', icon: <SquareTerminal size={15} strokeWidth={1.75} />, onSelect: openBuildOutput }, 'separator'] as ContextMenuEntry[])
+          : []),
+        ...build.commands.map((cmd) => ({
+          label: cmd === build.defaultCmd ? `${cmd}  (default)` : cmd,
+          icon: <Hammer size={15} strokeWidth={1.75} />,
+          onSelect: () => build.start(cmd)
+        }))
+      ];
 
   const onRunViewClose = (e: React.MouseEvent) => {
     e.stopPropagation();
@@ -254,7 +269,7 @@ const TileFrame = ({ tile, view, active, selected, alert, visible, live, hidden,
   };
 
   const killRun = () => {
-    if (runTile) void stopRun(runTile, true);
+    if (runTile) void stopRun(runTile, true, viewKind);
     onClose(tile.id);
   };
 
@@ -588,7 +603,7 @@ const TileFrame = ({ tile, view, active, selected, alert, visible, live, hidden,
                     <Hammer size={13} strokeWidth={2} />
                   )}
                 </button>
-                {(building || build.commands.length > 1) && (
+                {(building || buildFailed || build.commands.length > 1) && (
                   <button className={styles.action} onClick={onBuildCaret} onPointerDown={stopDrag} aria-label="Build menu">
                     <ChevronDown size={11} strokeWidth={2} />
                   </button>

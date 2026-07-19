@@ -2722,6 +2722,8 @@ fn kill_session(s: &Arc<Session>) {
             }
         }
         host_handle().kill(&s.tile_id);
+        s.exited.store(true, Ordering::Relaxed);
+        s.dirty.store(true, Ordering::Relaxed);
     });
 }
 
