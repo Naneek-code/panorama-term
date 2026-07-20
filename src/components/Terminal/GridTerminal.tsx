@@ -8,7 +8,7 @@ import { getSetting } from '~/adapter/settings/settings.client';
 import { scheduleConnect } from '~/usecase/util/connectScheduler';
 import { TERMINAL_TARGET_KEY } from '~/usecase/util/terminalTarget';
 import { keyToBytes } from '~/usecase/util/terminalKeys';
-import { looksLikeClaude } from '~/components/Terminal/AgentBar/parse';
+import { detectAgent } from '~/components/Terminal/AgentBar/parse';
 import { notifyClaude, clearNotify } from '~/components/commons/Notifications/bridge';
 import { openUrl } from '~/adapter/shell/shell.client';
 import { urlSpanAt, orderSel, selectText, lineSelection, wordSelection } from '~/usecase/util/terminalSelection';
@@ -202,7 +202,7 @@ const rowHtml = (line: string, attrs: Uint32Array, r: number, nCols: number): st
   return html;
 };
 
-const GridTerminal = ({ tileId, sessionId, readOnly, cwd, cols, rows, active, visible, elevated, restartKey, onCwd, onOscTitle, onAgentActive, onClaudeStatus, onClaudeDiff, onProgress }: GridTerminalProps) => {
+const GridTerminal = ({ tileId, sessionId, readOnly, cwd, cols, rows, active, visible, elevated, restartKey, onCwd, onOscTitle, onAgentActive, onClaudeStatus, onClaudeDiff, onProgress, onContextMenu }: GridTerminalProps) => {
   const [resumeId, setResumeId] = React.useState<string | null>(null);
   const termRef = React.useRef<HTMLDivElement>(null);
   const rowsRefEl = React.useRef<HTMLDivElement>(null);
@@ -381,7 +381,7 @@ const GridTerminal = ({ tileId, sessionId, readOnly, cwd, cols, rows, active, vi
             const candidate = resumeCandidateRef.current;
             if (!candidate) return;
             resumeCandidateRef.current = null;
-            if (!looksLikeClaude(frame.lines.join('\n'))) setResumeId(candidate);
+            if (!detectAgent(frame.lines.join('\n'))) setResumeId(candidate);
           },
           onExit: () => {
             exited = true;

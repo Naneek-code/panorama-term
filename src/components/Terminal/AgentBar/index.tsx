@@ -218,11 +218,12 @@ const AgentBar = ({ tileId, active, send, getLines, getStructured, focusTerminal
       const lines = getLines();
       const bufferText = lines.slice(-25).join('\n');
       const now = Date.now();
+      const currentType = agentTypeRef.current;
       if (lines === lastLinesRef.current) {
         if (seenRef.current) {
           if (!lastPresentRef.current && now - lastSeenRef.current > GONE_MS) {
             seenRef.current = false;
-            setClaudeActive(false);
+            setAgentType(null);
           } else {
             setStructured(getStructured());
           }
@@ -253,8 +254,6 @@ const AgentBar = ({ tileId, active, send, getLines, getStructured, focusTerminal
 
         if (seenRef.current) {
           if (isSpecific(currentType)) {
-            // Specific agents don't expire from simple inactivity (GONE_MS)
-            // But we clean them up if we parse a shell prompt return or exit banner indicators
             const isExiting = detectExitBanner(lines) || /exiting/i.test(bufferText);
             if (isExiting) {
               seenRef.current = false;
